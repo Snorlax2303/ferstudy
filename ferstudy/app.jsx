@@ -1,4 +1,4 @@
-// ferstudy/app.jsx — app shell completo com Firebase + Autenticação
+// ferstudy/app.jsx — app shell completo com Firebase + Autenticação CORRIGIDO
 
 const { useState: uS, useMemo, useEffect: uE, useRef: uR } = React;
 
@@ -61,10 +61,13 @@ function App() {
       setPassword('');
       setIsSignup(false);
     } catch (error) {
+      console.error('Erro signup:', error.code, error.message);
       if (error.code === 'auth/email-already-in-use') {
         setAuthError('Este e-mail já está registrado');
       } else if (error.code === 'auth/invalid-email') {
         setAuthError('E-mail inválido');
+      } else if (error.code === 'auth/weak-password') {
+        setAuthError('Senha muito fraca. Use 6+ caracteres');
       } else {
         setAuthError('Erro ao registrar: ' + error.message);
       }
@@ -85,10 +88,13 @@ function App() {
       setEmail('');
       setPassword('');
     } catch (error) {
+      console.error('Erro login:', error.code, error.message);
       if (error.code === 'auth/user-not-found') {
         setAuthError('Usuário não encontrado');
       } else if (error.code === 'auth/wrong-password') {
         setAuthError('Senha incorreta');
+      } else if (error.code === 'auth/invalid-email') {
+        setAuthError('E-mail inválido');
       } else {
         setAuthError('Erro ao fazer login: ' + error.message);
       }
@@ -146,6 +152,8 @@ function App() {
         if (firestoreEvents.length > 0) {
           setEvents(firestoreEvents);
         }
+      }, (error) => {
+        console.error('Erro ao sincronizar eventos:', error);
       });
 
     return () => unsubscribe();
@@ -328,34 +336,90 @@ function App() {
         alignItems: 'center',
         minHeight: '100vh',
         background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        fontFamily: 'Plus Jakarta Sans, sans-serif',
+        fontFamily: 'Plus Jakarta Sans, -apple-system, BlinkMacSystemFont, sans-serif',
+        padding: '20px',
       }}>
         <div style={{
           background: 'white',
-          borderRadius: 16,
-          padding: 40,
+          borderRadius: 20,
+          padding: '40px 32px',
           width: '100%',
-          maxWidth: 400,
-          boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+          maxWidth: 420,
+          boxShadow: '0 25px 50px rgba(0, 0, 0, 0.2)',
         }}>
-          <div style={{ textAlign: 'center', marginBottom: 30 }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>📚</div>
-            <h1 style={{ margin: 0, fontSize: 28, color: '#1e293b', fontWeight: 700 }}>
+          {/* Header */}
+          <div style={{ textAlign: 'center', marginBottom: 32 }}>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>📚</div>
+            <h1 style={{ 
+              margin: '0 0 8px 0', 
+              fontSize: 32, 
+              color: '#1e293b', 
+              fontWeight: 800,
+              letterSpacing: '-0.5px'
+            }}>
               Ferstudy
             </h1>
-            <p style={{ margin: '8px 0 0', color: '#64748b', fontSize: 14 }}>
-              Seu calendário de estudos na nuvem
+            <p style={{ 
+              margin: 0, 
+              color: '#64748b', 
+              fontSize: 14,
+              fontWeight: 500
+            }}>
+              Calendário de estudos na nuvem
             </p>
           </div>
 
+          {/* Tabs */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+            <button
+              onClick={() => { setIsSignup(false); setAuthError(''); }}
+              style={{
+                flex: 1,
+                padding: '10px',
+                border: 'none',
+                background: !isSignup ? '#667eea' : '#f1f5f9',
+                color: !isSignup ? 'white' : '#64748b',
+                borderRadius: 8,
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => { if (isSignup) e.target.style.background = '#e2e8f0'; }}
+              onMouseLeave={(e) => { if (isSignup) e.target.style.background = '#f1f5f9'; }}
+            >
+              Entrar
+            </button>
+            <button
+              onClick={() => { setIsSignup(true); setAuthError(''); }}
+              style={{
+                flex: 1,
+                padding: '10px',
+                border: 'none',
+                background: isSignup ? '#667eea' : '#f1f5f9',
+                color: isSignup ? 'white' : '#64748b',
+                borderRadius: 8,
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => { if (!isSignup) e.target.style.background = '#e2e8f0'; }}
+              onMouseLeave={(e) => { if (!isSignup) e.target.style.background = '#f1f5f9'; }}
+            >
+              Registrar
+            </button>
+          </div>
+
+          {/* Form */}
           <form onSubmit={isSignup ? handleSignup : handleLogin} style={{ marginBottom: 20 }}>
             <div style={{ marginBottom: 16 }}>
               <label style={{
                 display: 'block',
-                marginBottom: 6,
+                marginBottom: 8,
                 fontSize: 13,
                 fontWeight: 600,
-                color: '#475569',
+                color: '#334155',
               }}>
                 E-mail
               </label>
@@ -364,25 +428,31 @@ function App() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="seu@email.com"
+                autoComplete="email"
                 style={{
                   width: '100%',
-                  padding: '10px 12px',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 8,
+                  padding: '12px 14px',
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: 10,
                   fontSize: 14,
                   boxSizing: 'border-box',
                   outline: 'none',
+                  color: '#1e293b',
+                  background: '#ffffff',
+                  transition: 'border-color 0.2s',
                 }}
+                onFocus={(e) => e.target.style.borderColor = '#667eea'}
+                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
               />
             </div>
 
-            <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 20 }}>
               <label style={{
                 display: 'block',
-                marginBottom: 6,
+                marginBottom: 8,
                 fontSize: 13,
                 fontWeight: 600,
-                color: '#475569',
+                color: '#334155',
               }}>
                 Senha
               </label>
@@ -391,15 +461,21 @@ function App() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Mínimo 6 caracteres"
+                autoComplete={isSignup ? 'new-password' : 'current-password'}
                 style={{
                   width: '100%',
-                  padding: '10px 12px',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 8,
+                  padding: '12px 14px',
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: 10,
                   fontSize: 14,
                   boxSizing: 'border-box',
                   outline: 'none',
+                  color: '#1e293b',
+                  background: '#ffffff',
+                  transition: 'border-color 0.2s',
                 }}
+                onFocus={(e) => e.target.style.borderColor = '#667eea'}
+                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
               />
             </div>
 
@@ -407,10 +483,11 @@ function App() {
               <div style={{
                 background: '#fee2e2',
                 color: '#991b1b',
-                padding: '10px 12px',
-                borderRadius: 8,
+                padding: '12px 14px',
+                borderRadius: 10,
                 fontSize: 13,
                 marginBottom: 16,
+                border: '1px solid #fecaca',
               }}>
                 ⚠️ {authError}
               </div>
@@ -420,52 +497,42 @@ function App() {
               type="submit"
               style={{
                 width: '100%',
-                padding: '12px',
+                padding: '12px 16px',
                 background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                 color: 'white',
                 border: 'none',
-                borderRadius: 8,
+                borderRadius: 10,
                 fontSize: 14,
-                fontWeight: 600,
+                fontWeight: 700,
                 cursor: 'pointer',
-                marginBottom: 12,
+                transition: 'all 0.2s',
+                boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.transform = 'translateY(-2px)';
+                e.target.style.boxShadow = '0 6px 20px rgba(102, 126, 234, 0.6)';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.transform = 'translateY(0)';
+                e.target.style.boxShadow = '0 4px 15px rgba(102, 126, 234, 0.4)';
               }}
             >
               {isSignup ? 'Criar conta' : 'Entrar'}
             </button>
           </form>
 
-          <button
-            onClick={() => {
-              setIsSignup(!isSignup);
-              setAuthError('');
-            }}
-            style={{
-              width: '100%',
-              padding: '12px',
-              background: '#f1f5f9',
-              color: '#667eea',
-              border: 'none',
-              borderRadius: 8,
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            {isSignup ? 'Já tem conta? Entrar' : 'Não tem conta? Registrar'}
-          </button>
-
+          {/* Info */}
           <div style={{
-            marginTop: 20,
-            padding: '12px',
+            padding: '16px',
             background: '#f0f4ff',
-            borderRadius: 8,
+            borderRadius: 10,
             fontSize: 12,
             color: '#475569',
-            lineHeight: 1.6,
+            lineHeight: 1.7,
+            border: '1px solid #e0e7ff',
           }}>
-            <strong>📝 Dica:</strong><br/>
-            Faça login com qualquer e-mail e senha com 6+ caracteres para começar!
+            <strong style={{ color: '#334155' }}>💡 Dica:</strong><br/>
+            Use qualquer e-mail e senha com 6+ caracteres para registrar e começar!
           </div>
         </div>
       </div>
