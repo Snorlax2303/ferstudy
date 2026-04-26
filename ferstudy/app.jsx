@@ -1,4 +1,4 @@
-// ferstudy/app.jsx — main app shell
+// ferstudy/app.jsx — main app shell com persistência
 
 const { useState: uS, useMemo, useEffect: uE, useRef: uR } = React;
 
@@ -27,7 +27,24 @@ function App() {
   const [cursor, setCursor] = uS(new Date(today.getFullYear(), today.getMonth(), 1)); // month nav
   const [selected, setSelected] = uS(today);
   const [view, setView] = uS('month');
-  const [events, setEvents] = uS(SEED_EVENTS);
+  
+  // PERSISTÊNCIA: Carregar eventos do localStorage
+  const [events, setEvents] = uS(() => {
+    try {
+      const saved = localStorage.getItem('ferstudy.events');
+      return saved ? JSON.parse(saved) : SEED_EVENTS;
+    } catch (_) {
+      return SEED_EVENTS;
+    }
+  });
+
+  // Salvar eventos sempre que mudarem
+  uE(() => {
+    try {
+      localStorage.setItem('ferstudy.events', JSON.stringify(events));
+    } catch (_) {}
+  }, [events]);
+
   const [editing, setEditing] = uS(null); // { event } | { defaultDate } | null
   const [modalOpen, setModalOpen] = uS(false);
   const [hiddenCats, setHiddenCats] = uS([]);
@@ -35,6 +52,7 @@ function App() {
   const [navView, setNavView] = uS('calendar');
   const [showMonths, setShowMonths] = uS(false);
   const [agendaCollapsed, setAgendaCollapsed] = uS(false);
+  
   const [categories, setCategories] = uS(() => {
     try {
       const saved = localStorage.getItem('ferstudy.categories');
@@ -42,7 +60,13 @@ function App() {
     } catch (_) {}
     return Object.values(CATEGORIES).map(c => ({ id: c.id, label: c.label, color: c.color }));
   });
-  uE(() => { try { localStorage.setItem('ferstudy.categories', JSON.stringify(categories)); } catch(_){} }, [categories]);
+  
+  // Salvar categorias sempre que mudarem
+  uE(() => { 
+    try { 
+      localStorage.setItem('ferstudy.categories', JSON.stringify(categories)); 
+    } catch(_){} 
+  }, [categories]);
 
   // Build a categories map from current state, merging soft variants on the fly
   const catMap = useMemo(() => {
@@ -92,17 +116,21 @@ function App() {
 
   const saveEvent = (data) => {
     if (data.id != null) {
+      // Editar evento existente
       setEvents(prev => prev.map(e => e.id === data.id ? { ...e, ...data } : e));
     } else {
+      // Criar novo evento
       const id = Math.max(...events.map(e => e.id)) + 1;
       setEvents(prev => [...prev, { ...data, id }]);
     }
     setModalOpen(false);
   };
+  
   const deleteEvent = (id) => {
     setEvents(prev => prev.filter(e => e.id !== id));
     setModalOpen(false);
   };
+  
   const moveEvent = (id, newDateKey) => {
     setEvents(prev => prev.map(e => e.id === id ? { ...e, date: newDateKey } : e));
   };
