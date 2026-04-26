@@ -1,5 +1,5 @@
 // ferstudy/firebase-config.js
-// ✅ Firebase inicializado corretamente!
+// ✅ Firebase com inicialização robusta
 
 const firebaseConfig = {
   apiKey: "AIzaSyCrwApr2CdU59OKwtLZKyHOnksy5DqqW7I",
@@ -10,32 +10,26 @@ const firebaseConfig = {
   appId: "1:815271116137:web:38bcb7a2661843b0b491f8"
 };
 
-// Inicializar Firebase ANTES de usar
+console.log("📌 Iniciando Firebase...");
+
+// Inicializar Firebase
 try {
-  firebase.initializeApp(firebaseConfig);
-  console.log("✅ Firebase inicializado com sucesso!");
+  if (!firebase.apps || firebase.apps.length === 0) {
+    firebase.initializeApp(firebaseConfig);
+    console.log("✅ Firebase app inicializado");
+  }
 } catch (error) {
-  console.error("❌ Erro ao inicializar Firebase:", error);
+  console.error("❌ Erro ao inicializar Firebase:", error.message);
 }
 
-// Esperar Firebase estar pronto
-let db = null;
-let auth = null;
-
-// Tentar acessar depois de um delay para garantir que Firebase carregou
-setTimeout(() => {
-  try {
-    db = firebase.firestore();
-    auth = firebase.auth();
-    
-    window.db = db;
-    window.auth = auth;
-    
-    console.log("✅ Firestore e Auth disponíveis!");
-  } catch (error) {
-    console.error("❌ Erro ao acessar Firestore/Auth:", error);
-  }
-}, 100);
-
-// Exportar também se precisar
-window.firebaseConfig = firebaseConfig;
+// Acessar serviços
+try {
+  window.db = firebase.firestore();
+  window.auth = firebase.auth();
+  console.log("✅ Firestore e Auth prontos!");
+} catch (error) {
+  console.error("❌ Erro ao acessar serviços:", error.message);
+  // Se falhar, criar placeholders
+  window.db = null;
+  window.auth = null;
+}
