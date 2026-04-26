@@ -1,6 +1,6 @@
-// ferstudy/app.jsx — app com verificação de Firebase
+// ferstudy/app.jsx — app que não fica travado
 
-const { useState: uS, useMemo, useEffect: uE, useRef: uR } = React;
+const { useState: uS, useMemo, useEffect: uE } = React;
 
 const VIEWS = [
   { id: 'month', label: 'Mês' },
@@ -20,49 +20,54 @@ function App() {
   // Estado de autenticação
   const [user, setUser] = uS(null);
   const [loading, setLoading] = uS(true);
-  const [firebaseReady, setFirebaseReady] = uS(false);
   const [email, setEmail] = uS('');
   const [password, setPassword] = uS('');
   const [isSignup, setIsSignup] = uS(false);
   const [authError, setAuthError] = uS('');
 
-  // Verificar se Firebase está pronto
+  // Escutar mudanças de autenticação - com timeout
   uE(() => {
-    const checkFirebase = setInterval(() => {
-      if (window.auth && window.db) {
-        setFirebaseReady(true);
-        console.log("✅ Firebase está pronto!");
-        clearInterval(checkFirebase);
+    const timeout = setTimeout(() => {
+      // Se Firebase não carregou em 3 segundos, deixar ir mesmo assim
+      if (!window.auth) {
+        console.warn("⚠️ Firebase não carregou, continuando sem autenticação");
+        setLoading(false);
+        return;
       }
-    }, 100);
 
-    return () => clearInterval(checkFirebase);
+      const unsubscribe = window.auth.onAuthStateChanged((currentUser) => {
+        setUser(currentUser);
+        setLoading(false);
+      }, (error) => {
+        console.error("Erro de autenticação:", error);
+        setLoading(false);
+      });
+
+      return () => unsubscribe();
+    }, 500);
+
+    return () => clearTimeout(timeout);
   }, []);
 
-  // Escutar mudanças de autenticação
+  // Forçar sair da tela de loading após 5 segundos
   uE(() => {
-    if (!window.auth || !firebaseReady) {
-      return;
-    }
-
-    const unsubscribe = window.auth.onAuthStateChanged((currentUser) => {
-      setUser(currentUser);
+    const forceTimeout = setTimeout(() => {
       setLoading(false);
-    });
+    }, 5000);
 
-    return () => unsubscribe();
-  }, [firebaseReady]);
+    return () => clearTimeout(forceTimeout);
+  }, []);
 
   // Funções de autenticação
   const handleSignup = async (e) => {
     e.preventDefault();
     setAuthError('');
-
-    if (!firebaseReady) {
-      setAuthError('Firebase ainda está carregando... Aguarde um momento.');
+    
+    if (!window.auth) {
+      setAuthError('Autenticação não disponível. Recarregue a página.');
       return;
     }
-    
+
     if (!email || !password) {
       setAuthError('Preencha e-mail e senha');
       return;
@@ -79,13 +84,13 @@ function App() {
       setPassword('');
       setIsSignup(false);
     } catch (error) {
-      console.error('Erro signup:', error.code, error.message);
+      console.error('Erro signup:', error.code);
       if (error.code === 'auth/email-already-in-use') {
         setAuthError('Este e-mail já está registrado');
       } else if (error.code === 'auth/invalid-email') {
         setAuthError('E-mail inválido');
       } else if (error.code === 'auth/weak-password') {
-        setAuthError('Senha muito fraca. Use 6+ caracteres');
+        setAuthError('Senha muito fraca');
       } else {
         setAuthError('Erro: ' + error.message);
       }
@@ -95,12 +100,12 @@ function App() {
   const handleLogin = async (e) => {
     e.preventDefault();
     setAuthError('');
-
-    if (!firebaseReady) {
-      setAuthError('Firebase ainda está carregando... Aguarde um momento.');
+    
+    if (!window.auth) {
+      setAuthError('Autenticação não disponível. Recarregue a página.');
       return;
     }
-    
+
     if (!email || !password) {
       setAuthError('Preencha e-mail e senha');
       return;
@@ -111,13 +116,11 @@ function App() {
       setEmail('');
       setPassword('');
     } catch (error) {
-      console.error('Erro login:', error.code, error.message);
+      console.error('Erro login:', error.code);
       if (error.code === 'auth/user-not-found') {
         setAuthError('Usuário não encontrado');
       } else if (error.code === 'auth/wrong-password') {
         setAuthError('Senha incorreta');
-      } else if (error.code === 'auth/invalid-email') {
-        setAuthError('E-mail inválido');
       } else {
         setAuthError('Erro: ' + error.message);
       }
@@ -126,16 +129,18 @@ function App() {
 
   const handleLogout = async () => {
     try {
-      await window.auth.signOut();
+      if (window.auth) {
+        await window.auth.signOut();
+      }
       setEmail('');
       setPassword('');
       setAuthError('');
     } catch (error) {
-      console.error('Erro ao fazer logout:', error);
+      console.error('Erro logout:', error);
     }
   };
 
-  // Apply tweaks → body data attributes
+  // Apply tweaks
   uE(() => {
     document.body.dataset.theme = tweaks.theme;
     document.body.dataset.density = tweaks.density;
@@ -146,7 +151,6 @@ function App() {
   const [selected, setSelected] = uS(today);
   const [view, setView] = uS('month');
   
-  // PERSISTÊNCIA: Carregar eventos do localStorage + Firebase
   const [events, setEvents] = uS(() => {
     try {
       const saved = localStorage.getItem('ferstudy.events');
@@ -156,31 +160,6 @@ function App() {
     }
   });
 
-  // Sincronizar eventos com Firestore quando usuário loga
-  uE(() => {
-    if (!user || !window.db) return;
-
-    const unsubscribe = window.db
-      .collection('users')
-      .doc(user.uid)
-      .collection('events')
-      .onSnapshot((snapshot) => {
-        const firestoreEvents = [];
-        snapshot.forEach((doc) => {
-          firestoreEvents.push({ id: doc.id, ...doc.data() });
-        });
-        
-        if (firestoreEvents.length > 0) {
-          setEvents(firestoreEvents);
-        }
-      }, (error) => {
-        console.error('Erro ao sincronizar eventos:', error);
-      });
-
-    return () => unsubscribe();
-  }, [user]);
-
-  // Salvar eventos no localStorage + Firebase
   uE(() => {
     try {
       localStorage.setItem('ferstudy.events', JSON.stringify(events));
@@ -193,7 +172,7 @@ function App() {
             .collection('events')
             .doc(String(event.id))
             .set(event)
-            .catch((error) => console.error('Erro ao salvar evento:', error));
+            .catch((error) => console.error('Erro salvar:', error));
         });
       }
     } catch (_) {}
@@ -276,7 +255,6 @@ function App() {
   
   const deleteEvent = (id) => {
     setEvents(prev => prev.filter(e => e.id !== id));
-    
     if (user && window.db) {
       window.db
         .collection('users')
@@ -284,9 +262,8 @@ function App() {
         .collection('events')
         .doc(String(id))
         .delete()
-        .catch((error) => console.error('Erro ao deletar evento:', error));
+        .catch((error) => console.error('Erro deletar:', error));
     }
-    
     setModalOpen(false);
   };
   
@@ -328,27 +305,40 @@ function App() {
     return upcoming[0];
   }, [events]);
 
-  // TELA DE CARREGAMENTO DO FIREBASE
-  if (loading || !firebaseReady) {
+  // TELA DE LOADING
+  if (loading) {
     return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      }}>
-        <div style={{ textAlign: 'center', color: 'white' }}>
-          <div style={{ fontSize: 48, marginBottom: 20 }}>📚</div>
-          <div style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 10 }}>Ferstudy</div>
-          <div style={{ fontSize: 14, opacity: 0.9 }}>
-            {!firebaseReady ? 'Inicializando Firebase...' : 'Carregando...'}
+      <>
+        <div className="app-bg" />
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: '100vh',
+          background: 'var(--bg)',
+        }}>
+          <div style={{ textAlign: 'center', color: 'var(--text-1)' }}>
+            <div style={{ fontSize: 56, marginBottom: 20 }}>📚</div>
+            <h1 style={{ margin: '0 0 12px 0', fontSize: 28, fontWeight: 700 }}>Ferstudy</h1>
+            <p style={{ margin: '0 0 24px 0', color: 'var(--text-2)', fontSize: 14 }}>Preparando tudo...</p>
+            <div style={{
+              width: 40,
+              height: 40,
+              border: '3px solid var(--surface-hi)',
+              borderTop: '3px solid var(--primary)',
+              borderRadius: '50%',
+              margin: '0 auto',
+              animation: 'spin 0.8s linear infinite',
+            }}>
+              <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+            </div>
           </div>
         </div>
-      </div>
+      </>
     );
   }
 
+  // TELA DE LOGIN
   if (!user) {
     return (
       <div style={{
@@ -357,7 +347,6 @@ function App() {
         alignItems: 'center',
         minHeight: '100vh',
         background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        fontFamily: 'Plus Jakarta Sans, -apple-system, BlinkMacSystemFont, sans-serif',
         padding: '20px',
       }}>
         <div style={{
@@ -368,195 +357,62 @@ function App() {
           maxWidth: 420,
           boxShadow: '0 25px 50px rgba(0, 0, 0, 0.2)',
         }}>
-          {/* Header */}
           <div style={{ textAlign: 'center', marginBottom: 32 }}>
             <div style={{ fontSize: 56, marginBottom: 16 }}>📚</div>
-            <h1 style={{ 
-              margin: '0 0 8px 0', 
-              fontSize: 32, 
-              color: '#1e293b', 
-              fontWeight: 800,
-              letterSpacing: '-0.5px'
-            }}>
-              Ferstudy
-            </h1>
-            <p style={{ 
-              margin: 0, 
-              color: '#64748b', 
-              fontSize: 14,
-              fontWeight: 500
-            }}>
-              Calendário de estudos na nuvem
-            </p>
+            <h1 style={{ margin: '0 0 8px 0', fontSize: 32, color: '#1e293b', fontWeight: 800 }}>Ferstudy</h1>
+            <p style={{ margin: 0, color: '#64748b', fontSize: 14 }}>Calendário de estudos</p>
           </div>
 
-          {/* Tabs */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-            <button
-              onClick={() => { setIsSignup(false); setAuthError(''); }}
-              style={{
-                flex: 1,
-                padding: '10px',
-                border: 'none',
-                background: !isSignup ? '#667eea' : '#f1f5f9',
-                color: !isSignup ? 'white' : '#64748b',
-                borderRadius: 8,
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-              }}
-            >
-              Entrar
-            </button>
-            <button
-              onClick={() => { setIsSignup(true); setAuthError(''); }}
-              style={{
-                flex: 1,
-                padding: '10px',
-                border: 'none',
-                background: isSignup ? '#667eea' : '#f1f5f9',
-                color: isSignup ? 'white' : '#64748b',
-                borderRadius: 8,
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-              }}
-            >
-              Registrar
-            </button>
+            <button onClick={() => { setIsSignup(false); setAuthError(''); }} style={{
+              flex: 1, padding: '10px', border: 'none',
+              background: !isSignup ? '#667eea' : '#f1f5f9',
+              color: !isSignup ? 'white' : '#64748b',
+              borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+            }}>Entrar</button>
+            <button onClick={() => { setIsSignup(true); setAuthError(''); }} style={{
+              flex: 1, padding: '10px', border: 'none',
+              background: isSignup ? '#667eea' : '#f1f5f9',
+              color: isSignup ? 'white' : '#64748b',
+              borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+            }}>Registrar</button>
           </div>
 
-          {/* Form */}
           <form onSubmit={isSignup ? handleSignup : handleLogin} style={{ marginBottom: 20 }}>
             <div style={{ marginBottom: 16 }}>
-              <label style={{
-                display: 'block',
-                marginBottom: 8,
-                fontSize: 13,
-                fontWeight: 600,
-                color: '#334155',
-              }}>
-                E-mail
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="seu@email.com"
-                autoComplete="email"
-                style={{
-                  width: '100%',
-                  padding: '12px 14px',
-                  border: '1.5px solid #e2e8f0',
-                  borderRadius: 10,
-                  fontSize: 14,
-                  boxSizing: 'border-box',
-                  outline: 'none',
-                  color: '#1e293b',
-                  background: '#ffffff',
-                  transition: 'border-color 0.2s',
-                }}
+              <label style={{ display: 'block', marginBottom: 8, fontSize: 13, fontWeight: 600, color: '#334155' }}>E-mail</label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seu@email.com"
+                style={{ width: '100%', padding: '12px 14px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 14, color: '#1e293b', background: '#ffffff' }}
                 onFocus={(e) => e.target.style.borderColor = '#667eea'}
-                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
-              />
+                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'} />
             </div>
 
             <div style={{ marginBottom: 20 }}>
-              <label style={{
-                display: 'block',
-                marginBottom: 8,
-                fontSize: 13,
-                fontWeight: 600,
-                color: '#334155',
-              }}>
-                Senha
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Mínimo 6 caracteres"
-                autoComplete={isSignup ? 'new-password' : 'current-password'}
-                style={{
-                  width: '100%',
-                  padding: '12px 14px',
-                  border: '1.5px solid #e2e8f0',
-                  borderRadius: 10,
-                  fontSize: 14,
-                  boxSizing: 'border-box',
-                  outline: 'none',
-                  color: '#1e293b',
-                  background: '#ffffff',
-                  transition: 'border-color 0.2s',
-                }}
+              <label style={{ display: 'block', marginBottom: 8, fontSize: 13, fontWeight: 600, color: '#334155' }}>Senha</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres"
+                style={{ width: '100%', padding: '12px 14px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 14, color: '#1e293b', background: '#ffffff' }}
                 onFocus={(e) => e.target.style.borderColor = '#667eea'}
-                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
-              />
+                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'} />
             </div>
 
-            {authError && (
-              <div style={{
-                background: '#fee2e2',
-                color: '#991b1b',
-                padding: '12px 14px',
-                borderRadius: 10,
-                fontSize: 13,
-                marginBottom: 16,
-                border: '1px solid #fecaca',
-              }}>
-                ⚠️ {authError}
-              </div>
-            )}
+            {authError && <div style={{ background: '#fee2e2', color: '#991b1b', padding: '12px 14px', borderRadius: 10, fontSize: 13, marginBottom: 16 }}>⚠️ {authError}</div>}
 
-            <button
-              type="submit"
-              style={{
-                width: '100%',
-                padding: '12px 16px',
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                color: 'white',
-                border: 'none',
-                borderRadius: 10,
-                fontSize: 14,
-                fontWeight: 700,
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-                boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
-              }}
-              onMouseEnter={(e) => {
-                e.target.style.transform = 'translateY(-2px)';
-                e.target.style.boxShadow = '0 6px 20px rgba(102, 126, 234, 0.6)';
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.transform = 'translateY(0)';
-                e.target.style.boxShadow = '0 4px 15px rgba(102, 126, 234, 0.4)';
-              }}
-            >
-              {isSignup ? 'Criar conta' : 'Entrar'}
-            </button>
+            <button type="submit" style={{
+              width: '100%', padding: '12px 16px',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              color: 'white', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer',
+            }}>{isSignup ? 'Criar conta' : 'Entrar'}</button>
           </form>
 
-          {/* Info */}
-          <div style={{
-            padding: '16px',
-            background: '#f0f4ff',
-            borderRadius: 10,
-            fontSize: 12,
-            color: '#475569',
-            lineHeight: 1.7,
-            border: '1px solid #e0e7ff',
-          }}>
-            <strong style={{ color: '#334155' }}>💡 Dica:</strong><br/>
-            Use qualquer e-mail e senha com 6+ caracteres para registrar!
+          <div style={{ padding: '16px', background: '#f0f4ff', borderRadius: 10, fontSize: 12, color: '#475569', border: '1px solid #e0e7ff' }}>
+            <strong style={{ color: '#334155' }}>💡 Dica:</strong><br/>Use qualquer e-mail e senha com 6+ caracteres para registrar!
           </div>
         </div>
       </div>
     );
   }
 
-  // APP PRINCIPAL (igual ao anterior, omitido por brevidade)
+  // APP PRINCIPAL
   return (
     <>
       <div className="app-bg" />
@@ -651,7 +507,7 @@ function App() {
 
             {agendaCollapsed ? (
               <div className="agenda collapsed" onClick={() => setAgendaCollapsed(false)}>
-                <button className="agenda-collapse-btn" title="Expandir agenda" onClick={(e) => { e.stopPropagation(); setAgendaCollapsed(false); }}>
+                <button className="agenda-collapse-btn" title="Expandir" onClick={(e) => { e.stopPropagation(); setAgendaCollapsed(false); }}>
                   <Icon name="chev-l" size={14} />
                 </button>
                 <span className="vertical-label">Agendado</span>
