@@ -1,4 +1,4 @@
-// ferstudy/app.jsx — main app shell com persistência
+// ferstudy/app.jsx — app shell completo com Firebase + Autenticação
 
 const { useState: uS, useMemo, useEffect: uE, useRef: uR } = React;
 
@@ -9,13 +9,102 @@ const VIEWS = [
 ];
 
 function App() {
-  const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  const TWEAK_DEFAULTS = {
     "theme": "blue",
     "density": "comfy",
     "evtStyle": "bar"
-  }/*EDITMODE-END*/;
+  };
 
   const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  
+  // Estado de autenticação
+  const [user, setUser] = uS(null);
+  const [loading, setLoading] = uS(true);
+  const [email, setEmail] = uS('');
+  const [password, setPassword] = uS('');
+  const [isSignup, setIsSignup] = uS(false);
+  const [authError, setAuthError] = uS('');
+
+  // Escutar mudanças de autenticação
+  uE(() => {
+    if (!window.auth) {
+      setTimeout(() => setLoading(false), 500);
+      return;
+    }
+
+    const unsubscribe = window.auth.onAuthStateChanged((currentUser) => {
+      setUser(currentUser);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Funções de autenticação
+  const handleSignup = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    
+    if (!email || !password) {
+      setAuthError('Preencha e-mail e senha');
+      return;
+    }
+
+    if (password.length < 6) {
+      setAuthError('Senha deve ter no mínimo 6 caracteres');
+      return;
+    }
+
+    try {
+      await window.auth.createUserWithEmailAndPassword(email, password);
+      setEmail('');
+      setPassword('');
+      setIsSignup(false);
+    } catch (error) {
+      if (error.code === 'auth/email-already-in-use') {
+        setAuthError('Este e-mail já está registrado');
+      } else if (error.code === 'auth/invalid-email') {
+        setAuthError('E-mail inválido');
+      } else {
+        setAuthError('Erro ao registrar: ' + error.message);
+      }
+    }
+  };
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    
+    if (!email || !password) {
+      setAuthError('Preencha e-mail e senha');
+      return;
+    }
+
+    try {
+      await window.auth.signInWithEmailAndPassword(email, password);
+      setEmail('');
+      setPassword('');
+    } catch (error) {
+      if (error.code === 'auth/user-not-found') {
+        setAuthError('Usuário não encontrado');
+      } else if (error.code === 'auth/wrong-password') {
+        setAuthError('Senha incorreta');
+      } else {
+        setAuthError('Erro ao fazer login: ' + error.message);
+      }
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await window.auth.signOut();
+      setEmail('');
+      setPassword('');
+      setAuthError('');
+    } catch (error) {
+      console.error('Erro ao fazer logout:', error);
+    }
+  };
 
   // Apply tweaks → body data attributes
   uE(() => {
@@ -24,11 +113,11 @@ function App() {
   }, [tweaks.theme, tweaks.density]);
 
   const today = FAKE_TODAY;
-  const [cursor, setCursor] = uS(new Date(today.getFullYear(), today.getMonth(), 1)); // month nav
+  const [cursor, setCursor] = uS(new Date(today.getFullYear(), today.getMonth(), 1));
   const [selected, setSelected] = uS(today);
   const [view, setView] = uS('month');
   
-  // PERSISTÊNCIA: Carregar eventos do localStorage
+  // PERSISTÊNCIA: Carregar eventos do localStorage + Firebase
   const [events, setEvents] = uS(() => {
     try {
       const saved = localStorage.getItem('ferstudy.events');
@@ -38,21 +127,50 @@ function App() {
     }
   });
 
-  // Salvar eventos sempre que mudarem
+  // Sincronizar eventos com Firestore quando usuário loga
+  uE(() => {
+    if (!user || !window.db) return;
+
+    // Buscar eventos do Firestore
+    const unsubscribe = window.db
+      .collection('users')
+      .doc(user.uid)
+      .collection('events')
+      .onSnapshot((snapshot) => {
+        const firestoreEvents = [];
+        snapshot.forEach((doc) => {
+          firestoreEvents.push({ id: doc.id, ...doc.data() });
+        });
+        
+        // Atualizar estado se houver eventos no Firebase
+        if (firestoreEvents.length > 0) {
+          setEvents(firestoreEvents);
+        }
+      });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Salvar eventos no localStorage + Firebase
   uE(() => {
     try {
       localStorage.setItem('ferstudy.events', JSON.stringify(events));
+      
+      // Salvar no Firestore se usuário está logado
+      if (user && window.db) {
+        events.forEach((event) => {
+          window.db
+            .collection('users')
+            .doc(user.uid)
+            .collection('events')
+            .doc(String(event.id))
+            .set(event)
+            .catch((error) => console.error('Erro ao salvar evento:', error));
+        });
+      }
     } catch (_) {}
-  }, [events]);
+  }, [events, user]);
 
-  const [editing, setEditing] = uS(null); // { event } | { defaultDate } | null
-  const [modalOpen, setModalOpen] = uS(false);
-  const [hiddenCats, setHiddenCats] = uS([]);
-  const [search, setSearch] = uS('');
-  const [navView, setNavView] = uS('calendar');
-  const [showMonths, setShowMonths] = uS(false);
-  const [agendaCollapsed, setAgendaCollapsed] = uS(false);
-  
   const [categories, setCategories] = uS(() => {
     try {
       const saved = localStorage.getItem('ferstudy.categories');
@@ -61,18 +179,15 @@ function App() {
     return Object.values(CATEGORIES).map(c => ({ id: c.id, label: c.label, color: c.color }));
   });
   
-  // Salvar categorias sempre que mudarem
   uE(() => { 
     try { 
       localStorage.setItem('ferstudy.categories', JSON.stringify(categories)); 
-    } catch(_){} 
+    } catch(_){}
   }, [categories]);
 
-  // Build a categories map from current state, merging soft variants on the fly
   const catMap = useMemo(() => {
     const m = {};
     for (const c of categories) {
-      // derive soft from color (oklch -> add /alpha) — fallback if not oklch
       const soft = c.color.startsWith('oklch(')
         ? c.color.replace(/\)\s*$/, ' / 0.18)')
         : c.color + '33';
@@ -81,10 +196,10 @@ function App() {
     return m;
   }, [categories]);
 
-  // Make catMap available to other components that read window.CATEGORIES
   uE(() => { window.CATEGORIES = catMap; }, [catMap]);
 
-  // Index events by date
+  const [search, setSearch] = uS('');
+
   const eventsByDay = useMemo(() => {
     const lower = search.trim().toLowerCase();
     const map = {};
@@ -108,6 +223,13 @@ function App() {
     else if (view === 'day') setSelected(addDays(selected, delta));
   };
 
+  const [editing, setEditing] = uS(null);
+  const [modalOpen, setModalOpen] = uS(false);
+  const [hiddenCats, setHiddenCats] = uS([]);
+  const [navView, setNavView] = uS('calendar');
+  const [showMonths, setShowMonths] = uS(false);
+  const [agendaCollapsed, setAgendaCollapsed] = uS(false);
+
   const openCreate = (date) => {
     setEditing({ defaultDate: date ? ymd(date) : ymd(selected) });
     setModalOpen(true);
@@ -116,11 +238,9 @@ function App() {
 
   const saveEvent = (data) => {
     if (data.id != null) {
-      // Editar evento existente
       setEvents(prev => prev.map(e => e.id === data.id ? { ...e, ...data } : e));
     } else {
-      // Criar novo evento
-      const id = Math.max(...events.map(e => e.id)) + 1;
+      const id = Math.max(...events.map(e => e.id || 0), 0) + 1;
       setEvents(prev => [...prev, { ...data, id }]);
     }
     setModalOpen(false);
@@ -128,6 +248,18 @@ function App() {
   
   const deleteEvent = (id) => {
     setEvents(prev => prev.filter(e => e.id !== id));
+    
+    // Deletar do Firestore também
+    if (user && window.db) {
+      window.db
+        .collection('users')
+        .doc(user.uid)
+        .collection('events')
+        .doc(String(id))
+        .delete()
+        .catch((error) => console.error('Erro ao deletar evento:', error));
+    }
+    
     setModalOpen(false);
   };
   
@@ -139,7 +271,6 @@ function App() {
     setHiddenCats(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
   };
 
-  // Days for week/day views
   const days = useMemo(() => {
     if (view === 'week') {
       const start = startOfWeek(selected);
@@ -149,14 +280,12 @@ function App() {
     return [];
   }, [view, selected]);
 
-  // Week navigation cursors should sync month label too
   uE(() => {
     if (view !== 'month') {
       setCursor(new Date(selected.getFullYear(), selected.getMonth(), 1));
     }
   }, [selected, view]);
 
-  // Greeting
   const greet = (() => {
     const h = today.getHours();
     if (h < 12) return 'Bom dia';
@@ -164,7 +293,6 @@ function App() {
     return 'Boa noite';
   })();
 
-  // Find next prova for the deadline pill
   const nextProva = useMemo(() => {
     const now = today.getTime();
     const upcoming = events
@@ -173,6 +301,178 @@ function App() {
     return upcoming[0];
   }, [events]);
 
+  // TELA DE LOGIN
+  if (loading) {
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: '100vh',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      }}>
+        <div style={{ textAlign: 'center', color: 'white' }}>
+          <div style={{ fontSize: 48, marginBottom: 20 }}>📚</div>
+          <div style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 10 }}>Ferstudy</div>
+          <div style={{ fontSize: 14, opacity: 0.9 }}>Carregando...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        fontFamily: 'Plus Jakarta Sans, sans-serif',
+      }}>
+        <div style={{
+          background: 'white',
+          borderRadius: 16,
+          padding: 40,
+          width: '100%',
+          maxWidth: 400,
+          boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+        }}>
+          <div style={{ textAlign: 'center', marginBottom: 30 }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>📚</div>
+            <h1 style={{ margin: 0, fontSize: 28, color: '#1e293b', fontWeight: 700 }}>
+              Ferstudy
+            </h1>
+            <p style={{ margin: '8px 0 0', color: '#64748b', fontSize: 14 }}>
+              Seu calendário de estudos na nuvem
+            </p>
+          </div>
+
+          <form onSubmit={isSignup ? handleSignup : handleLogin} style={{ marginBottom: 20 }}>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{
+                display: 'block',
+                marginBottom: 6,
+                fontSize: 13,
+                fontWeight: 600,
+                color: '#475569',
+              }}>
+                E-mail
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="seu@email.com"
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  boxSizing: 'border-box',
+                  outline: 'none',
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{
+                display: 'block',
+                marginBottom: 6,
+                fontSize: 13,
+                fontWeight: 600,
+                color: '#475569',
+              }}>
+                Senha
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Mínimo 6 caracteres"
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  boxSizing: 'border-box',
+                  outline: 'none',
+                }}
+              />
+            </div>
+
+            {authError && (
+              <div style={{
+                background: '#fee2e2',
+                color: '#991b1b',
+                padding: '10px 12px',
+                borderRadius: 8,
+                fontSize: 13,
+                marginBottom: 16,
+              }}>
+                ⚠️ {authError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              style={{
+                width: '100%',
+                padding: '12px',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: 'white',
+                border: 'none',
+                borderRadius: 8,
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: 'pointer',
+                marginBottom: 12,
+              }}
+            >
+              {isSignup ? 'Criar conta' : 'Entrar'}
+            </button>
+          </form>
+
+          <button
+            onClick={() => {
+              setIsSignup(!isSignup);
+              setAuthError('');
+            }}
+            style={{
+              width: '100%',
+              padding: '12px',
+              background: '#f1f5f9',
+              color: '#667eea',
+              border: 'none',
+              borderRadius: 8,
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            {isSignup ? 'Já tem conta? Entrar' : 'Não tem conta? Registrar'}
+          </button>
+
+          <div style={{
+            marginTop: 20,
+            padding: '12px',
+            background: '#f0f4ff',
+            borderRadius: 8,
+            fontSize: 12,
+            color: '#475569',
+            lineHeight: 1.6,
+          }}>
+            <strong>📝 Dica:</strong><br/>
+            Faça login com qualquer e-mail e senha com 6+ caracteres para começar!
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // APP PRINCIPAL
   return (
     <>
       <div className="app-bg" />
@@ -186,6 +486,19 @@ function App() {
             <button className={navView === 'settings' ? 'active' : ''} onClick={() => setNavView('settings')} title="Configurações"><Icon name="settings" /></button>
           </div>
           <div className="footer">
+            <button 
+              onClick={handleLogout}
+              title="Sair" 
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-2)',
+                cursor: 'pointer',
+                fontSize: 16,
+              }}
+            >
+              🚪
+            </button>
           </div>
         </aside>
 
@@ -194,7 +507,7 @@ function App() {
           {/* Topbar */}
           <header className="topbar">
             <div className="greeting">
-              <h1>{greet}, Fernanda<span className="wave">.</span></h1>
+              <h1>{greet}, {user.email.split('@')[0]}<span className="wave">.</span></h1>
               <p>Você tem <strong style={{ color:'var(--text-1)' }}>{(eventsByDay[ymd(today)] || []).length} eventos</strong> hoje · próxima prova em {nextProva ? Math.max(0, Math.ceil((fromYMD(nextProva.date) - today)/86400000)) : '—'} dias</p>
             </div>
             <div className="topbar-right">
