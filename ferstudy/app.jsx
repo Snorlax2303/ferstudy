@@ -1,4 +1,4 @@
-// ferstudy/app.jsx — app shell completo com Firebase + Autenticação CORRIGIDO
+// ferstudy/app.jsx — app com verificação de Firebase
 
 const { useState: uS, useMemo, useEffect: uE, useRef: uR } = React;
 
@@ -20,15 +20,28 @@ function App() {
   // Estado de autenticação
   const [user, setUser] = uS(null);
   const [loading, setLoading] = uS(true);
+  const [firebaseReady, setFirebaseReady] = uS(false);
   const [email, setEmail] = uS('');
   const [password, setPassword] = uS('');
   const [isSignup, setIsSignup] = uS(false);
   const [authError, setAuthError] = uS('');
 
+  // Verificar se Firebase está pronto
+  uE(() => {
+    const checkFirebase = setInterval(() => {
+      if (window.auth && window.db) {
+        setFirebaseReady(true);
+        console.log("✅ Firebase está pronto!");
+        clearInterval(checkFirebase);
+      }
+    }, 100);
+
+    return () => clearInterval(checkFirebase);
+  }, []);
+
   // Escutar mudanças de autenticação
   uE(() => {
-    if (!window.auth) {
-      setTimeout(() => setLoading(false), 500);
+    if (!window.auth || !firebaseReady) {
       return;
     }
 
@@ -38,12 +51,17 @@ function App() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [firebaseReady]);
 
   // Funções de autenticação
   const handleSignup = async (e) => {
     e.preventDefault();
     setAuthError('');
+
+    if (!firebaseReady) {
+      setAuthError('Firebase ainda está carregando... Aguarde um momento.');
+      return;
+    }
     
     if (!email || !password) {
       setAuthError('Preencha e-mail e senha');
@@ -69,7 +87,7 @@ function App() {
       } else if (error.code === 'auth/weak-password') {
         setAuthError('Senha muito fraca. Use 6+ caracteres');
       } else {
-        setAuthError('Erro ao registrar: ' + error.message);
+        setAuthError('Erro: ' + error.message);
       }
     }
   };
@@ -77,6 +95,11 @@ function App() {
   const handleLogin = async (e) => {
     e.preventDefault();
     setAuthError('');
+
+    if (!firebaseReady) {
+      setAuthError('Firebase ainda está carregando... Aguarde um momento.');
+      return;
+    }
     
     if (!email || !password) {
       setAuthError('Preencha e-mail e senha');
@@ -96,7 +119,7 @@ function App() {
       } else if (error.code === 'auth/invalid-email') {
         setAuthError('E-mail inválido');
       } else {
-        setAuthError('Erro ao fazer login: ' + error.message);
+        setAuthError('Erro: ' + error.message);
       }
     }
   };
@@ -137,7 +160,6 @@ function App() {
   uE(() => {
     if (!user || !window.db) return;
 
-    // Buscar eventos do Firestore
     const unsubscribe = window.db
       .collection('users')
       .doc(user.uid)
@@ -148,7 +170,6 @@ function App() {
           firestoreEvents.push({ id: doc.id, ...doc.data() });
         });
         
-        // Atualizar estado se houver eventos no Firebase
         if (firestoreEvents.length > 0) {
           setEvents(firestoreEvents);
         }
@@ -164,7 +185,6 @@ function App() {
     try {
       localStorage.setItem('ferstudy.events', JSON.stringify(events));
       
-      // Salvar no Firestore se usuário está logado
       if (user && window.db) {
         events.forEach((event) => {
           window.db
@@ -257,7 +277,6 @@ function App() {
   const deleteEvent = (id) => {
     setEvents(prev => prev.filter(e => e.id !== id));
     
-    // Deletar do Firestore também
     if (user && window.db) {
       window.db
         .collection('users')
@@ -309,8 +328,8 @@ function App() {
     return upcoming[0];
   }, [events]);
 
-  // TELA DE LOGIN
-  if (loading) {
+  // TELA DE CARREGAMENTO DO FIREBASE
+  if (loading || !firebaseReady) {
     return (
       <div style={{
         display: 'flex',
@@ -322,7 +341,9 @@ function App() {
         <div style={{ textAlign: 'center', color: 'white' }}>
           <div style={{ fontSize: 48, marginBottom: 20 }}>📚</div>
           <div style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 10 }}>Ferstudy</div>
-          <div style={{ fontSize: 14, opacity: 0.9 }}>Carregando...</div>
+          <div style={{ fontSize: 14, opacity: 0.9 }}>
+            {!firebaseReady ? 'Inicializando Firebase...' : 'Carregando...'}
+          </div>
         </div>
       </div>
     );
@@ -385,8 +406,6 @@ function App() {
                 cursor: 'pointer',
                 transition: 'all 0.2s',
               }}
-              onMouseEnter={(e) => { if (isSignup) e.target.style.background = '#e2e8f0'; }}
-              onMouseLeave={(e) => { if (isSignup) e.target.style.background = '#f1f5f9'; }}
             >
               Entrar
             </button>
@@ -404,8 +423,6 @@ function App() {
                 cursor: 'pointer',
                 transition: 'all 0.2s',
               }}
-              onMouseEnter={(e) => { if (!isSignup) e.target.style.background = '#e2e8f0'; }}
-              onMouseLeave={(e) => { if (!isSignup) e.target.style.background = '#f1f5f9'; }}
             >
               Registrar
             </button>
@@ -532,19 +549,18 @@ function App() {
             border: '1px solid #e0e7ff',
           }}>
             <strong style={{ color: '#334155' }}>💡 Dica:</strong><br/>
-            Use qualquer e-mail e senha com 6+ caracteres para registrar e começar!
+            Use qualquer e-mail e senha com 6+ caracteres para registrar!
           </div>
         </div>
       </div>
     );
   }
 
-  // APP PRINCIPAL
+  // APP PRINCIPAL (igual ao anterior, omitido por brevidade)
   return (
     <>
       <div className="app-bg" />
       <div className="app-shell">
-        {/* SIDEBAR */}
         <aside className="sidebar">
           <div className="logo">F</div>
           <div className="nav">
@@ -553,25 +569,11 @@ function App() {
             <button className={navView === 'settings' ? 'active' : ''} onClick={() => setNavView('settings')} title="Configurações"><Icon name="settings" /></button>
           </div>
           <div className="footer">
-            <button 
-              onClick={handleLogout}
-              title="Sair" 
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-2)',
-                cursor: 'pointer',
-                fontSize: 16,
-              }}
-            >
-              🚪
-            </button>
+            <button onClick={handleLogout} title="Sair" style={{background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', fontSize: 16}}>🚪</button>
           </div>
         </aside>
 
-        {/* CANVAS */}
         <main className="canvas">
-          {/* Topbar */}
           <header className="topbar">
             <div className="greeting">
               <h1>{greet}, {user.email.split('@')[0]}<span className="wave">.</span></h1>
@@ -589,7 +591,6 @@ function App() {
             </div>
           </header>
 
-          {/* WORKSPACE */}
           {navView === 'calendar' ? (
           <div className={'workspace' + (agendaCollapsed ? ' agenda-collapsed' : '')}>
             <section className="cal-panel">
@@ -621,7 +622,6 @@ function App() {
                 </div>
               </div>
 
-              {/* filters */}
               <div className="filters">
                 <span style={{ display:'inline-flex', alignItems:'center', gap: 6, color:'var(--text-3)', fontSize:11, fontWeight:600, marginRight:4 }}>
                   <Icon name="filter" size={13} /> FILTRAR
@@ -629,11 +629,7 @@ function App() {
                 {categories.map(c => {
                   const active = !hiddenCats.includes(c.id);
                   return (
-                    <button
-                      key={c.id}
-                      className={'filter-chip' + (active ? ' active' : ' muted')}
-                      onClick={() => toggleCat(c.id)}
-                    >
+                    <button key={c.id} className={'filter-chip' + (active ? ' active' : ' muted')} onClick={() => toggleCat(c.id)}>
                       <span className="swatch" style={{ background: c.color }} />
                       {c.label}
                     </button>
@@ -641,29 +637,11 @@ function App() {
                 })}
               </div>
 
-              {/* main view */}
               {view === 'month' && (
-                <MonthView
-                  grid={grid}
-                  eventsByDay={eventsByDay}
-                  today={today}
-                  selected={selected}
-                  onSelectDay={setSelected}
-                  onOpenEvent={openEdit}
-                  onMoveEvent={moveEvent}
-                  evtStyle={tweaks.evtStyle}
-                  hiddenCats={hiddenCats}
-                />
+                <MonthView grid={grid} eventsByDay={eventsByDay} today={today} selected={selected} onSelectDay={setSelected} onOpenEvent={openEdit} onMoveEvent={moveEvent} evtStyle={tweaks.evtStyle} hiddenCats={hiddenCats} />
               )}
               {(view === 'week' || view === 'day') && (
-                <TimelineView
-                  days={days}
-                  eventsByDay={eventsByDay}
-                  today={today}
-                  onOpenEvent={openEdit}
-                  hiddenCats={hiddenCats}
-                  onSelectDay={(d) => { setSelected(d); if (view === 'week') setView('day'); }}
-                />
+                <TimelineView days={days} eventsByDay={eventsByDay} today={today} onOpenEvent={openEdit} hiddenCats={hiddenCats} onSelectDay={(d) => { setSelected(d); if (view === 'week') setView('day'); }} />
               )}
 
               <button className="fab" onClick={() => openCreate(selected)} title="Novo evento">
@@ -680,14 +658,7 @@ function App() {
                 <span className="pill-count">{(eventsByDay[ymd(selected)] || []).length}</span>
               </div>
             ) : (
-              <AgendaPanel
-                selected={selected}
-                eventsByDay={eventsByDay}
-                onSelectDay={setSelected}
-                onOpenEvent={openEdit}
-                hiddenCats={hiddenCats}
-                onCollapse={() => setAgendaCollapsed(true)}
-              />
+              <AgendaPanel selected={selected} eventsByDay={eventsByDay} onSelectDay={setSelected} onOpenEvent={openEdit} hiddenCats={hiddenCats} onCollapse={() => setAgendaCollapsed(true)} />
             )}
           </div>
           ) : (
@@ -700,51 +671,32 @@ function App() {
       </div>
 
       {modalOpen && (
-        <EventModal
-          event={editing?.event}
-          defaultDate={editing?.defaultDate}
-          onClose={() => setModalOpen(false)}
-          onSave={saveEvent}
-          onDelete={deleteEvent}
-        />
+        <EventModal event={editing?.event} defaultDate={editing?.defaultDate} onClose={() => setModalOpen(false)} onSave={saveEvent} onDelete={deleteEvent} />
       )}
 
-      {/* TWEAKS PANEL */}
       <TweaksPanel title="Tweaks · Ferstudy">
         <TweakSection title="Tema de cor">
-          <TweakRadio
-            value={tweaks.theme}
-            onChange={(v) => setTweak('theme', v)}
-            options={[
-              { value: 'blue', label: 'Azul' },
-              { value: 'violet', label: 'Violeta' },
-              { value: 'emerald', label: 'Verde' },
-              { value: 'rose', label: 'Rose' },
-              { value: 'amber', label: 'Âmbar' },
-            ]}
-          />
+          <TweakRadio value={tweaks.theme} onChange={(v) => setTweak('theme', v)} options={[
+            { value: 'blue', label: 'Azul' },
+            { value: 'violet', label: 'Violeta' },
+            { value: 'emerald', label: 'Verde' },
+            { value: 'rose', label: 'Rose' },
+            { value: 'amber', label: 'Âmbar' },
+          ]} />
         </TweakSection>
         <TweakSection title="Densidade">
-          <TweakRadio
-            value={tweaks.density}
-            onChange={(v) => setTweak('density', v)}
-            options={[
-              { value: 'compact', label: 'Compacto' },
-              { value: 'comfy', label: 'Confortável' },
-              { value: 'cozy', label: 'Espaçoso' },
-            ]}
-          />
+          <TweakRadio value={tweaks.density} onChange={(v) => setTweak('density', v)} options={[
+            { value: 'compact', label: 'Compacto' },
+            { value: 'comfy', label: 'Confortável' },
+            { value: 'cozy', label: 'Espaçoso' },
+          ]} />
         </TweakSection>
         <TweakSection title="Estilo do card de evento">
-          <TweakRadio
-            value={tweaks.evtStyle}
-            onChange={(v) => setTweak('evtStyle', v)}
-            options={[
-              { value: 'bar', label: 'Barra' },
-              { value: 'soft', label: 'Suave' },
-              { value: 'pill', label: 'Sólido' },
-            ]}
-          />
+          <TweakRadio value={tweaks.evtStyle} onChange={(v) => setTweak('evtStyle', v)} options={[
+            { value: 'bar', label: 'Barra' },
+            { value: 'soft', label: 'Suave' },
+            { value: 'pill', label: 'Sólido' },
+          ]} />
         </TweakSection>
       </TweaksPanel>
     </>
