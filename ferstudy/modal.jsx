@@ -1,0 +1,459 @@
+// ferstudy/modal.jsx — Event create/edit modal + Notes system
+const { useState, useEffect, useRef } = React;
+
+// ═══════════════════════════════════════════════════════════════════
+// NOTAS HELPERS
+// ═══════════════════════════════════════════════════════════════════
+function createNote(content = '', tags = []) {
+  return {
+    id: Date.now() + Math.random(),
+    content,
+    tags,
+    color: ['yellow', 'pink', 'blue', 'green', 'purple'][Math.floor(Math.random() * 5)],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    pinned: false,
+  };
+}
+
+const SUGGESTED_TAGS = ['Importante', 'Revisar', 'Dúvida', 'Resumo', 'Exemplo', 'Dever'];
+const NOTE_COLORS = [
+  { id: 'yellow', label: 'Amarelo', bg: '#FEF3C7', border: '#FBBF24' },
+  { id: 'pink', label: 'Rosa', bg: '#FCE7F3', border: '#F472B6' },
+  { id: 'blue', label: 'Azul', bg: '#DBEAFE', border: '#60A5FA' },
+  { id: 'green', label: 'Verde', bg: '#DCFCE7', border: '#4ADE80' },
+  { id: 'purple', label: 'Roxo', bg: '#EDE9FE', border: '#C084FC' },
+];
+
+function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
+  const isNew = !event?.id;
+  const [title, setTitle] = useState(event?.title || '');
+  const [subject, setSubject] = useState(event?.subject || SUBJECTS[0]);
+  const [date, setDate] = useState(event?.date || defaultDate || ymd(FAKE_TODAY));
+  const [category, setCategory] = useState(event?.category || 'aula');
+  const [start, setStart] = useState(event?.start || '14:00');
+  const [end, setEnd] = useState(event?.end || '15:30');
+  const [location, setLocation] = useState(event?.location || '');
+  const [note, setNote] = useState(event?.note || '');
+  
+  // NOVO: Notas múltiplas
+  const [notes, setNotes] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`notes_${date}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [showNotes, setShowNotes] = useState(false);
+
+  useEffect(() => {
+    const onEsc = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, [onClose]);
+
+  // Salvar notas ao mudar
+  useEffect(() => {
+    try {
+      if (notes.length > 0) {
+        localStorage.setItem(`notes_${date}`, JSON.stringify(notes));
+      } else {
+        localStorage.removeItem(`notes_${date}`);
+      }
+    } catch (_) {}
+  }, [notes, date]);
+
+  const setHour = (which, delta) => {
+    const cur = which === 'start' ? start : end;
+    const [h, m] = cur.split(':').map(Number);
+    let nh = h + delta;
+    if (nh < 0) nh = 23; if (nh > 23) nh = 0;
+    const v = `${pad(nh)}:${pad(m)}`;
+    which === 'start' ? setStart(v) : setEnd(v);
+  };
+  const setMin = (which, delta) => {
+    const cur = which === 'start' ? start : end;
+    const [h, m] = cur.split(':').map(Number);
+    let nm = m + delta;
+    let nh = h;
+    if (nm < 0) { nm = 45; nh = (nh - 1 + 24) % 24; }
+    if (nm > 59) { nm = 0; nh = (nh + 1) % 24; }
+    const v = `${pad(nh)}:${pad(nm)}`;
+    which === 'start' ? setStart(v) : setEnd(v);
+  };
+
+  // FUNÇÕES DE NOTAS
+  const addNote = () => {
+    setNotes([createNote(''), ...notes]);
+  };
+
+  const updateNote = (id, updates) => {
+    setNotes(notes.map(n => n.id === id ? { ...n, ...updates, updatedAt: new Date().toISOString() } : n));
+  };
+
+  const deleteNote = (id) => {
+    setNotes(notes.filter(n => n.id !== id));
+  };
+
+  const togglePin = (id) => {
+    const note = notes.find(n => n.id === id);
+    if (note) updateNote(id, { pinned: !note.pinned });
+  };
+
+  const submit = () => {
+    if (!title.trim()) return;
+    onSave({
+      id: event?.id,
+      title: title.trim(),
+      subject,
+      date, category, start, end,
+      location: location.trim() || null,
+      note: note.trim() || null,
+      members: event?.members || null,
+    });
+  };
+
+  const TimeStepper = ({ which, value }) => {
+    const [h, m] = value.split(':');
+    return (
+      <div className="time-stepper">
+        <button onClick={() => setHour(which, -1)}><Icon name="chev-l" size={12} /></button>
+        <input value={h + ':' + m} readOnly />
+        <button onClick={() => setHour(which, 1)}><Icon name="chev-r" size={12} /></button>
+      </div>
+    );
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <h2>{isNew ? 'Novo evento' : 'Editar evento'}</h2>
+        <button className="close" onClick={onClose}><Icon name="close" size={16} /></button>
+
+        <div style={{ marginTop: 14 }}>
+          <input
+            autoFocus
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            placeholder="Título do evento"
+            style={{
+              width: '100%', background: 'transparent', border: 0, outline: 0,
+              fontSize: 22, fontWeight: 700, color: 'var(--text-1)',
+              padding: '6px 0 14px',
+              borderBottom: '1px solid var(--hairline)',
+              letterSpacing: '-0.4px',
+            }}
+          />
+        </div>
+
+        <div className="field">
+          <label>Matéria</label>
+          <select
+            value={subject}
+            onChange={e => setSubject(e.target.value)}
+            style={{
+              background: 'var(--surface-hi)', border: '1px solid var(--hairline)',
+              borderRadius: 10, padding: '7px 12px', fontSize: 13, color: 'var(--text-1)',
+              outline: 0, width: 'auto', cursor: 'pointer',
+            }}
+          >
+            {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+
+        <div className="field">
+          <label>Tipo</label>
+          <div className="cat-select">
+            {Object.values(CATEGORIES).map(c => {
+              const active = category === c.id;
+              return (
+                <button
+                  key={c.id}
+                  className={'cat-pill' + (active ? ' active' : '')}
+                  style={active ? {
+                    '--cp-color': c.soft,
+                    '--cp-border': c.color,
+                    '--cp-text': 'var(--text-1)',
+                  } : {}}
+                  onClick={() => setCategory(c.id)}
+                >
+                  <span className="swatch" style={{ background: c.color }} />
+                  {c.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="field">
+          <label>Data</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+        </div>
+
+        <div className="field">
+          <label>Horário</label>
+          <div className="time-picker">
+            <TimeStepper which="start" value={start} />
+            <span className="time-sep">→</span>
+            <TimeStepper which="end" value={end} />
+            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
+              {fmtDuration(Math.max(durationMin(start, end), 0))}
+            </span>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>Local</label>
+          <input
+            type="text" value={location}
+            onChange={e => setLocation(e.target.value)}
+            placeholder="Sala, link ou local"
+          />
+        </div>
+
+        <div className="field">
+          <label>Observação rápida</label>
+          <input
+            type="text" value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="Adicionar observação"
+          />
+        </div>
+
+        {/* NOVA SEÇÃO: NOTAS MÚLTIPLAS */}
+        <div style={{ marginTop: 20, paddingTop: 20, borderTop: '1px solid var(--hairline)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <label style={{ margin: 0, fontWeight: 600, fontSize: 13 }}>
+              📝 Anotações do dia ({notes.length})
+            </label>
+            <button
+              onClick={() => setShowNotes(!showNotes)}
+              style={{
+                background: 'var(--primary)', color: 'white', border: 'none',
+                borderRadius: 6, padding: '6px 12px', fontSize: 11, fontWeight: 600,
+                cursor: 'pointer', transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.opacity = '0.9'}
+              onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
+            >
+              {showNotes ? '✕ Fechar' : '+ Adicionar'}
+            </button>
+          </div>
+
+          {showNotes && (
+            <NotesPanel
+              notes={notes}
+              onAddNote={addNote}
+              onUpdateNote={updateNote}
+              onDeleteNote={deleteNote}
+              onTogglePin={togglePin}
+            />
+          )}
+
+          {!showNotes && notes.length > 0 && (
+            <div style={{ fontSize: 11, color: 'var(--text-3)', background: 'var(--surface)', padding: 8, borderRadius: 6 }}>
+              ✓ {notes.length} anotação{notes.length !== 1 ? 's' : ''} salva{notes.length !== 1 ? 's' : ''}
+            </div>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          {!isNew ? (
+            <button className="btn btn-danger" onClick={() => onDelete(event.id)}>
+              <span style={{ display:'inline-flex', alignItems:'center', gap: 6 }}>
+                <Icon name="trash" size={14} /> Excluir
+              </span>
+            </button>
+          ) : <span />}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+            <button className="btn btn-primary" onClick={submit}>{isNew ? 'Criar' : 'Salvar'}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// COMPONENT: PAINEL DE NOTAS
+// ═══════════════════════════════════════════════════════════════════
+
+function NotesPanel({ notes, onAddNote, onUpdateNote, onDeleteNote, onTogglePin }) {
+  const pinnedNotes = notes.filter(n => n.pinned);
+  const unpinnedNotes = notes.filter(n => !n.pinned);
+  const sortedNotes = [...pinnedNotes, ...unpinnedNotes];
+
+  return (
+    <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 10, marginBottom: 12, maxHeight: 350, overflowY: 'auto' }}>
+      <div style={{ display: 'flex', gap: 6, flexDirection: 'column' }}>
+        {sortedNotes.map(note => (
+          <NoteCard
+            key={note.id}
+            note={note}
+            onUpdate={(updates) => onUpdateNote(note.id, updates)}
+            onDelete={() => onDeleteNote(note.id)}
+            onTogglePin={() => onTogglePin(note.id)}
+          />
+        ))}
+      </div>
+
+      <button
+        onClick={onAddNote}
+        style={{
+          width: '100%', marginTop: 8, padding: 8, background: notes.length > 0 ? 'var(--hairline)' : 'var(--primary)',
+          color: notes.length > 0 ? 'var(--text-2)' : 'white',
+          border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 600,
+          cursor: 'pointer', transition: 'all 0.2s',
+        }}
+        onMouseEnter={(e) => e.currentTarget.style.opacity = '0.8'}
+        onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
+      >
+        + {notes.length === 0 ? 'Criar primeira nota' : 'Nova anotação'}
+      </button>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// COMPONENT: CARD DE NOTA INDIVIDUAL
+// ═══════════════════════════════════════════════════════════════════
+
+function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState(note.content);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const colorData = NOTE_COLORS.find(c => c.id === note.color) || NOTE_COLORS[0];
+
+  const handleSave = () => {
+    onUpdate({ content: editContent });
+    setIsEditing(false);
+  };
+
+  const timeAgo = (() => {
+    const diff = new Date() - new Date(note.updatedAt);
+    const mins = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    if (mins < 1) return 'agora';
+    if (mins < 60) return `${mins}m atrás`;
+    if (hours < 24) return `${hours}h atrás`;
+    return 'ontem';
+  })();
+
+  return (
+    <div
+      style={{
+        background: colorData.bg,
+        borderLeft: `3px solid ${colorData.border}`,
+        borderRadius: 6,
+        padding: 8,
+        cursor: 'pointer',
+        transition: 'all 0.2s',
+        fontSize: 12,
+      }}
+      onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.08)'}
+      onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <button
+              onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
+              style={{ background: 'none', border: 'none', fontSize: 12, cursor: 'pointer', padding: 0 }}
+              title={note.pinned ? 'Desafixar' : 'Afixar'}
+            >
+              {note.pinned ? '📌' : '📍'}
+            </button>
+            <span style={{ fontSize: 9, color: 'var(--text-3)', opacity: 0.7 }}>{timeAgo}</span>
+          </div>
+
+          {!isEditing ? (
+            <div
+              onClick={() => setIsExpanded(!isExpanded)}
+              style={{
+                color: 'var(--text-2)',
+                lineHeight: '1.3',
+                display: isExpanded ? 'block' : '-webkit-box',
+                WebkitLineClamp: isExpanded ? 'unset' : 1,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {note.content || '(nota vazia)'}
+            </div>
+          ) : (
+            <textarea
+              autoFocus
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: '100%', padding: 6, border: '1px solid var(--hairline)',
+                borderRadius: 4, fontSize: 11, fontFamily: 'inherit',
+                minHeight: 50, resize: 'vertical', background: 'white',
+                color: 'var(--text-1)',
+              }}
+            />
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+          {isEditing ? (
+            <>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleSave(); }}
+                title="Salvar"
+                style={{
+                  background: 'var(--primary)', color: 'white', border: 'none',
+                  borderRadius: 4, padding: '4px 8px', fontSize: 10, cursor: 'pointer',
+                }}
+              >
+                ✓
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setIsEditing(false); setEditContent(note.content); }}
+                title="Cancelar"
+                style={{
+                  background: 'var(--hairline)', color: 'var(--text-2)', border: 'none',
+                  borderRadius: 4, padding: '4px 8px', fontSize: 10, cursor: 'pointer',
+                }}
+              >
+                ✕
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
+                title="Editar"
+                style={{
+                  background: 'none', border: 'none', fontSize: 11, cursor: 'pointer', padding: 0,
+                  color: 'var(--text-3)', opacity: 0.6,
+                }}
+              >
+                ✎
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                title="Deletar"
+                style={{
+                  background: 'none', border: 'none', fontSize: 11, cursor: 'pointer', padding: 0,
+                  color: 'var(--text-3)', opacity: 0.6,
+                }}
+              >
+                ✕
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+window.EventModal = EventModal;
+window.NotesPanel = NotesPanel;
+window.NoteCard = NoteCard;
