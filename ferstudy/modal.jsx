@@ -35,6 +35,7 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
   const [end, setEnd] = useState(event?.end || '15:30');
   const [location, setLocation] = useState(event?.location || '');
   const [note, setNote] = useState(event?.note || '');
+  const [completed, setCompleted] = useState(event?.completed || false);
   
   // NOVO: Notas múltiplas
   const [notes, setNotes] = useState(() => {
@@ -111,6 +112,7 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
       location: location.trim() || null,
       note: note.trim() || null,
       members: event?.members || null,
+      completed,
     });
   };
 
@@ -221,18 +223,35 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
           />
         </div>
 
+        {/* Status de conclusão */}
+        <div className="field" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <label style={{ margin: 0 }}>✓ Concluído</label>
+          <input
+            type="checkbox"
+            checked={completed}
+            onChange={e => setCompleted(e.target.checked)}
+            style={{ width: 18, height: 18, cursor: 'pointer' }}
+          />
+        </div>
+
         {/* NOVA SEÇÃO: NOTAS MÚLTIPLAS */}
         <div style={{ marginTop: 20, paddingTop: 20, borderTop: '1px solid var(--hairline)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <label style={{ margin: 0, fontWeight: 600, fontSize: 13 }}>
-              📝 Anotações do dia ({notes.length})
+              📝 Anotações ({notes.length})
             </label>
             <button
               onClick={() => setShowNotes(!showNotes)}
               style={{
-                background: 'var(--primary)', color: 'white', border: 'none',
-                borderRadius: 6, padding: '6px 12px', fontSize: 11, fontWeight: 600,
-                cursor: 'pointer', transition: 'all 0.2s',
+                background: showNotes ? 'var(--text-3)' : 'var(--primary)', 
+                color: 'white', 
+                border: 'none',
+                borderRadius: 6, 
+                padding: '6px 12px', 
+                fontSize: 11, 
+                fontWeight: 600,
+                cursor: 'pointer', 
+                transition: 'all 0.2s',
               }}
               onMouseEnter={(e) => e.currentTarget.style.opacity = '0.9'}
               onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
@@ -241,7 +260,7 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
             </button>
           </div>
 
-          {showNotes && (
+          {showNotes ? (
             <NotesPanel
               notes={notes}
               onAddNote={addNote}
@@ -249,13 +268,11 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
               onDeleteNote={deleteNote}
               onTogglePin={togglePin}
             />
-          )}
-
-          {!showNotes && notes.length > 0 && (
-            <div style={{ fontSize: 11, color: 'var(--text-3)', background: 'var(--surface)', padding: 8, borderRadius: 6 }}>
+          ) : notes.length > 0 ? (
+            <div style={{ fontSize: 11, color: 'var(--text-3)', background: 'var(--surface)', padding: 10, borderRadius: 6, marginBottom: 12 }}>
               ✓ {notes.length} anotação{notes.length !== 1 ? 's' : ''} salva{notes.length !== 1 ? 's' : ''}
             </div>
-          )}
+          ) : null}
         </div>
 
         <div className="modal-footer">
@@ -277,7 +294,7 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// COMPONENT: PAINEL DE NOTAS
+// COMPONENT: PAINEL DE NOTAS MELHORADO
 // ═══════════════════════════════════════════════════════════════════
 
 function NotesPanel({ notes, onAddNote, onUpdateNote, onDeleteNote, onTogglePin }) {
@@ -286,38 +303,77 @@ function NotesPanel({ notes, onAddNote, onUpdateNote, onDeleteNote, onTogglePin 
   const sortedNotes = [...pinnedNotes, ...unpinnedNotes];
 
   return (
-    <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 10, marginBottom: 12, maxHeight: 350, overflowY: 'auto' }}>
-      <div style={{ display: 'flex', gap: 6, flexDirection: 'column' }}>
-        {sortedNotes.map(note => (
-          <NoteCard
-            key={note.id}
-            note={note}
-            onUpdate={(updates) => onUpdateNote(note.id, updates)}
-            onDelete={() => onDeleteNote(note.id)}
-            onTogglePin={() => onTogglePin(note.id)}
-          />
-        ))}
+    <div style={{ 
+      background: 'var(--surface-hi)', 
+      borderRadius: 8, 
+      padding: 0,
+      marginBottom: 12, 
+      maxHeight: '400px',
+      display: 'flex',
+      flexDirection: 'column',
+      border: '1px solid var(--hairline)',
+      overflow: 'hidden',
+    }}>
+      {/* Notes list with scroll */}
+      <div style={{ 
+        flex: 1,
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        padding: '10px',
+        display: 'flex',
+        gap: '8px',
+        flexDirection: 'column',
+        scrollbarWidth: 'thin',
+      }}>
+        {sortedNotes.length === 0 ? (
+          <div style={{ 
+            padding: '20px 12px',
+            textAlign: 'center',
+            color: 'var(--text-3)',
+            fontSize: 12,
+          }}>
+            Nenhuma anotação ainda. Clique em "+ Criar primeira nota" para começar!
+          </div>
+        ) : (
+          sortedNotes.map(note => (
+            <NoteCard
+              key={note.id}
+              note={note}
+              onUpdate={(updates) => onUpdateNote(note.id, updates)}
+              onDelete={() => onDeleteNote(note.id)}
+              onTogglePin={() => onTogglePin(note.id)}
+            />
+          ))
+        )}
       </div>
 
+      {/* Add button at bottom */}
       <button
         onClick={onAddNote}
         style={{
-          width: '100%', marginTop: 8, padding: 8, background: notes.length > 0 ? 'var(--hairline)' : 'var(--primary)',
-          color: notes.length > 0 ? 'var(--text-2)' : 'white',
-          border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 600,
-          cursor: 'pointer', transition: 'all 0.2s',
+          width: '100%',
+          padding: '10px',
+          background: 'var(--primary)',
+          color: 'white',
+          border: 'none',
+          borderTop: '1px solid var(--hairline)',
+          borderRadius: 0,
+          fontSize: 11,
+          fontWeight: 600,
+          cursor: 'pointer',
+          transition: 'all 0.2s',
         }}
-        onMouseEnter={(e) => e.currentTarget.style.opacity = '0.8'}
+        onMouseEnter={(e) => e.currentTarget.style.opacity = '0.85'}
         onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
       >
-        + {notes.length === 0 ? 'Criar primeira nota' : 'Nova anotação'}
+        + {sortedNotes.length === 0 ? 'Criar primeira nota' : 'Nova anotação'}
       </button>
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// COMPONENT: CARD DE NOTA INDIVIDUAL
+// COMPONENT: CARD DE NOTA INDIVIDUAL MELHORADO
 // ═══════════════════════════════════════════════════════════════════
 
 function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
@@ -345,41 +401,42 @@ function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
     <div
       style={{
         background: colorData.bg,
-        borderLeft: `3px solid ${colorData.border}`,
+        borderLeft: `4px solid ${colorData.border}`,
         borderRadius: 6,
-        padding: 8,
+        padding: '10px',
         cursor: 'pointer',
         transition: 'all 0.2s',
         fontSize: 12,
       }}
-      onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.08)'}
+      onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)'}
       onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
             <button
               onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
-              style={{ background: 'none', border: 'none', fontSize: 12, cursor: 'pointer', padding: 0 }}
+              style={{ background: 'none', border: 'none', fontSize: 13, cursor: 'pointer', padding: 0 }}
               title={note.pinned ? 'Desafixar' : 'Afixar'}
             >
               {note.pinned ? '📌' : '📍'}
             </button>
-            <span style={{ fontSize: 9, color: 'var(--text-3)', opacity: 0.7 }}>{timeAgo}</span>
+            <span style={{ fontSize: 10, color: 'var(--text-3)', opacity: 0.7 }}>{timeAgo}</span>
           </div>
 
           {!isEditing ? (
             <div
               onClick={() => setIsExpanded(!isExpanded)}
               style={{
-                color: 'var(--text-2)',
-                lineHeight: '1.3',
+                color: 'var(--text-1)',
+                lineHeight: '1.4',
                 display: isExpanded ? 'block' : '-webkit-box',
-                WebkitLineClamp: isExpanded ? 'unset' : 1,
+                WebkitLineClamp: isExpanded ? 'unset' : 2,
                 WebkitBoxOrient: 'vertical',
                 overflow: 'hidden',
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
+                cursor: 'pointer',
               }}
             >
               {note.content || '(nota vazia)'}
@@ -391,10 +448,16 @@ function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
               onChange={(e) => setEditContent(e.target.value)}
               onClick={(e) => e.stopPropagation()}
               style={{
-                width: '100%', padding: 6, border: '1px solid var(--hairline)',
-                borderRadius: 4, fontSize: 11, fontFamily: 'inherit',
-                minHeight: 50, resize: 'vertical', background: 'white',
-                color: 'var(--text-1)',
+                width: '100%', 
+                padding: 8, 
+                border: '1px solid var(--primary)',
+                borderRadius: 4, 
+                fontSize: 11, 
+                fontFamily: 'inherit',
+                minHeight: 60, 
+                resize: 'vertical', 
+                background: 'white',
+                color: '#333',
               }}
             />
           )}
@@ -407,8 +470,14 @@ function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
                 onClick={(e) => { e.stopPropagation(); handleSave(); }}
                 title="Salvar"
                 style={{
-                  background: 'var(--primary)', color: 'white', border: 'none',
-                  borderRadius: 4, padding: '4px 8px', fontSize: 10, cursor: 'pointer',
+                  background: 'var(--primary)', 
+                  color: 'white', 
+                  border: 'none',
+                  borderRadius: 4, 
+                  padding: '5px 8px', 
+                  fontSize: 11, 
+                  cursor: 'pointer',
+                  fontWeight: 600,
                 }}
               >
                 ✓
@@ -417,8 +486,13 @@ function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
                 onClick={(e) => { e.stopPropagation(); setIsEditing(false); setEditContent(note.content); }}
                 title="Cancelar"
                 style={{
-                  background: 'var(--hairline)', color: 'var(--text-2)', border: 'none',
-                  borderRadius: 4, padding: '4px 8px', fontSize: 10, cursor: 'pointer',
+                  background: 'var(--hairline)', 
+                  color: 'var(--text-2)', 
+                  border: 'none',
+                  borderRadius: 4, 
+                  padding: '5px 8px', 
+                  fontSize: 11, 
+                  cursor: 'pointer',
                 }}
               >
                 ✕
@@ -430,8 +504,13 @@ function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
                 onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
                 title="Editar"
                 style={{
-                  background: 'none', border: 'none', fontSize: 11, cursor: 'pointer', padding: 0,
-                  color: 'var(--text-3)', opacity: 0.6,
+                  background: 'none', 
+                  border: 'none', 
+                  fontSize: 12, 
+                  cursor: 'pointer', 
+                  padding: '4px 6px',
+                  color: colorData.border,
+                  opacity: 0.8,
                 }}
               >
                 ✎
@@ -440,8 +519,13 @@ function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
                 onClick={(e) => { e.stopPropagation(); onDelete(); }}
                 title="Deletar"
                 style={{
-                  background: 'none', border: 'none', fontSize: 11, cursor: 'pointer', padding: 0,
-                  color: 'var(--text-3)', opacity: 0.6,
+                  background: 'none', 
+                  border: 'none', 
+                  fontSize: 12, 
+                  cursor: 'pointer', 
+                  padding: '4px 6px',
+                  color: '#E94B3C',
+                  opacity: 0.8,
                 }}
               >
                 ✕
