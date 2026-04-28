@@ -1,4 +1,5 @@
-// ferstudy/modal.jsx — Event create/edit modal + Notes system
+// ferstudy/modal.jsx — Event create/edit modal + Notes system com sync
+
 const { useState, useEffect, useRef } = React;
 
 // ═══════════════════════════════════════════════════════════════════
@@ -25,6 +26,16 @@ const NOTE_COLORS = [
   { id: 'purple', label: 'Roxo', bg: '#EDE9FE', border: '#C084FC' },
 ];
 
+// Lê notas do localStorage (que é mantido em sync pelo app.jsx via Firestore)
+function loadNotesForDate(dateKey) {
+  try {
+    const saved = localStorage.getItem(`notes_${dateKey}`);
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+}
+
 function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
   const isNew = !event?.id;
   const [title, setTitle] = useState(event?.title || '');
@@ -36,17 +47,13 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
   const [location, setLocation] = useState(event?.location || '');
   const [note, setNote] = useState(event?.note || '');
   const [completed, setCompleted] = useState(event?.completed || false);
-  
-  // NOVO: Notas múltiplas
-  const [notes, setNotes] = useState(() => {
-    try {
-      const saved = localStorage.getItem(`notes_${date}`);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+
+  // Notas do dia atual (carrega do localStorage, que é sincronizado pelo app.jsx)
+  const [notes, setNotes] = useState(() => loadNotesForDate(date));
   const [showNotes, setShowNotes] = useState(false);
+
+  // Flag para distinguir mudança vinda do usuário vs vinda da nuvem
+  const isLocalChange = useRef(false);
 
   useEffect(() => {
     const onEsc = (e) => { if (e.key === 'Escape') onClose(); };
@@ -54,13 +61,40 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
     return () => window.removeEventListener('keydown', onEsc);
   }, [onClose]);
 
-  // Salvar notas ao mudar
+  // Recarrega notas ao trocar a data do evento
+  useEffect(() => {
+    setNotes(loadNotesForDate(date));
+  }, [date]);
+
+  // 🔄 Escuta atualizações vindas da nuvem (outros devices)
+  useEffect(() => {
+    const handleNotesUpdate = () => {
+      // Não recarrega se a mudança veio do próprio modal
+      if (isLocalChange.current) {
+        isLocalChange.current = false;
+        return;
+      }
+      console.log("🔄 [MODAL] Recebendo update de notas da nuvem");
+      setNotes(loadNotesForDate(date));
+    };
+    window.addEventListener('notes-updated', handleNotesUpdate);
+    return () => window.removeEventListener('notes-updated', handleNotesUpdate);
+  }, [date]);
+
+  // 💾 Salva notas: localStorage + Firestore (via window.notesSync)
   useEffect(() => {
     try {
+      isLocalChange.current = true;
+
       if (notes.length > 0) {
         localStorage.setItem(`notes_${date}`, JSON.stringify(notes));
       } else {
         localStorage.removeItem(`notes_${date}`);
+      }
+
+      // Sincroniza com Firestore se usuário estiver logado
+      if (window.notesSync && window.notesSync.saveNote) {
+        window.notesSync.saveNote(date, notes);
       }
     } catch (_) {}
   }, [notes, date]);
@@ -73,30 +107,12 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
     const v = `${pad(nh)}:${pad(m)}`;
     which === 'start' ? setStart(v) : setEnd(v);
   };
-  const setMin = (which, delta) => {
-    const cur = which === 'start' ? start : end;
-    const [h, m] = cur.split(':').map(Number);
-    let nm = m + delta;
-    let nh = h;
-    if (nm < 0) { nm = 45; nh = (nh - 1 + 24) % 24; }
-    if (nm > 59) { nm = 0; nh = (nh + 1) % 24; }
-    const v = `${pad(nh)}:${pad(nm)}`;
-    which === 'start' ? setStart(v) : setEnd(v);
-  };
 
-  // FUNÇÕES DE NOTAS
-  const addNote = () => {
-    setNotes([createNote(''), ...notes]);
-  };
-
+  const addNote = () => setNotes([createNote(''), ...notes]);
   const updateNote = (id, updates) => {
     setNotes(notes.map(n => n.id === id ? { ...n, ...updates, updatedAt: new Date().toISOString() } : n));
   };
-
-  const deleteNote = (id) => {
-    setNotes(notes.filter(n => n.id !== id));
-  };
-
+  const deleteNote = (id) => setNotes(notes.filter(n => n.id !== id));
   const togglePin = (id) => {
     const note = notes.find(n => n.id === id);
     if (note) updateNote(id, { pinned: !note.pinned });
@@ -207,54 +223,33 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
 
         <div className="field">
           <label>Local</label>
-          <input
-            type="text" value={location}
-            onChange={e => setLocation(e.target.value)}
-            placeholder="Sala, link ou local"
-          />
+          <input type="text" value={location} onChange={e => setLocation(e.target.value)} placeholder="Sala, link ou local" />
         </div>
 
         <div className="field">
           <label>Observação rápida</label>
-          <input
-            type="text" value={note}
-            onChange={e => setNote(e.target.value)}
-            placeholder="Adicionar observação"
-          />
+          <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="Adicionar observação" />
         </div>
 
-        {/* Status de conclusão */}
         <div className="field" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <label style={{ margin: 0 }}>✓ Concluído</label>
-          <input
-            type="checkbox"
-            checked={completed}
-            onChange={e => setCompleted(e.target.checked)}
-            style={{ width: 18, height: 18, cursor: 'pointer' }}
-          />
+          <input type="checkbox" checked={completed} onChange={e => setCompleted(e.target.checked)} style={{ width: 18, height: 18, cursor: 'pointer' }} />
         </div>
 
-        {/* NOVA SEÇÃO: NOTAS MÚLTIPLAS */}
+        {/* Notas */}
         <div style={{ marginTop: 20, paddingTop: 20, borderTop: '1px solid var(--hairline)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
             <label style={{ margin: 0, fontWeight: 600, fontSize: 13 }}>
               📝 Anotações ({notes.length})
             </label>
             <button
               onClick={() => setShowNotes(!showNotes)}
               style={{
-                background: showNotes ? 'var(--text-3)' : 'var(--primary)', 
-                color: 'white', 
-                border: 'none',
-                borderRadius: 6, 
-                padding: '6px 12px', 
-                fontSize: 11, 
-                fontWeight: 600,
-                cursor: 'pointer', 
-                transition: 'all 0.2s',
+                background: showNotes ? 'var(--text-3)' : 'var(--primary)',
+                color: 'white', border: 'none',
+                borderRadius: 6, padding: '6px 12px', fontSize: 11, fontWeight: 600,
+                cursor: 'pointer', transition: 'all 0.2s',
               }}
-              onMouseEnter={(e) => e.currentTarget.style.opacity = '0.9'}
-              onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
             >
               {showNotes ? '✕ Fechar' : '+ Adicionar'}
             </button>
@@ -270,7 +265,7 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
             />
           ) : notes.length > 0 ? (
             <div style={{ fontSize: 11, color: 'var(--text-3)', background: 'var(--surface)', padding: 10, borderRadius: 6, marginBottom: 12 }}>
-              ✓ {notes.length} anotação{notes.length !== 1 ? 's' : ''} salva{notes.length !== 1 ? 's' : ''}
+              ✓ {notes.length} anotação{notes.length !== 1 ? 'ões' : ''} salva{notes.length !== 1 ? 's' : ''}
             </div>
           ) : null}
         </div>
@@ -294,44 +289,26 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// COMPONENT: PAINEL DE NOTAS MELHORADO
+// NOTES PANEL
 // ═══════════════════════════════════════════════════════════════════
-
 function NotesPanel({ notes, onAddNote, onUpdateNote, onDeleteNote, onTogglePin }) {
   const pinnedNotes = notes.filter(n => n.pinned);
   const unpinnedNotes = notes.filter(n => !n.pinned);
   const sortedNotes = [...pinnedNotes, ...unpinnedNotes];
 
   return (
-    <div style={{ 
-      background: 'var(--surface-hi)', 
-      borderRadius: 8, 
-      padding: 0,
-      marginBottom: 12, 
-      maxHeight: '400px',
-      display: 'flex',
-      flexDirection: 'column',
-      border: '1px solid var(--hairline)',
-      overflow: 'hidden',
+    <div style={{
+      background: 'var(--surface-hi)', borderRadius: 8, padding: 0,
+      marginBottom: 12, maxHeight: '400px',
+      display: 'flex', flexDirection: 'column',
+      border: '1px solid var(--hairline)', overflow: 'hidden',
     }}>
-      {/* Notes list with scroll */}
-      <div style={{ 
-        flex: 1,
-        overflowY: 'auto',
-        overflowX: 'hidden',
-        padding: '10px',
-        display: 'flex',
-        gap: '8px',
-        flexDirection: 'column',
-        scrollbarWidth: 'thin',
+      <div style={{
+        flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '10px',
+        display: 'flex', gap: '8px', flexDirection: 'column', scrollbarWidth: 'thin',
       }}>
         {sortedNotes.length === 0 ? (
-          <div style={{ 
-            padding: '20px 12px',
-            textAlign: 'center',
-            color: 'var(--text-3)',
-            fontSize: 12,
-          }}>
+          <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>
             Nenhuma anotação ainda. Clique em "+ Criar primeira nota" para começar!
           </div>
         ) : (
@@ -347,24 +324,15 @@ function NotesPanel({ notes, onAddNote, onUpdateNote, onDeleteNote, onTogglePin 
         )}
       </div>
 
-      {/* Add button at bottom */}
       <button
         onClick={onAddNote}
         style={{
-          width: '100%',
-          padding: '10px',
-          background: 'var(--primary)',
-          color: 'white',
-          border: 'none',
-          borderTop: '1px solid var(--hairline)',
-          borderRadius: 0,
-          fontSize: 11,
-          fontWeight: 600,
-          cursor: 'pointer',
-          transition: 'all 0.2s',
+          width: '100%', padding: '10px',
+          background: 'var(--primary)', color: 'white',
+          border: 'none', borderTop: '1px solid var(--hairline)',
+          borderRadius: 0, fontSize: 11, fontWeight: 600,
+          cursor: 'pointer', transition: 'all 0.2s',
         }}
-        onMouseEnter={(e) => e.currentTarget.style.opacity = '0.85'}
-        onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
       >
         + {sortedNotes.length === 0 ? 'Criar primeira nota' : 'Nova anotação'}
       </button>
@@ -373,9 +341,8 @@ function NotesPanel({ notes, onAddNote, onUpdateNote, onDeleteNote, onTogglePin 
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// COMPONENT: CARD DE NOTA INDIVIDUAL MELHORADO
+// NOTE CARD
 // ═══════════════════════════════════════════════════════════════════
-
 function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(note.content);
@@ -402,21 +369,16 @@ function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
       style={{
         background: colorData.bg,
         borderLeft: `4px solid ${colorData.border}`,
-        borderRadius: 6,
-        padding: '10px',
-        cursor: 'pointer',
-        transition: 'all 0.2s',
-        fontSize: 12,
+        borderRadius: 6, padding: '10px',
+        cursor: 'pointer', transition: 'all 0.2s', fontSize: 12,
       }}
-      onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)'}
-      onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+          <div style={{ display:'flex', alignItems:'center', gap: 6, marginBottom: 6 }}>
             <button
               onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
-              style={{ background: 'none', border: 'none', fontSize: 13, cursor: 'pointer', padding: 0 }}
+              style={{ background:'none', border:'none', fontSize:13, cursor:'pointer', padding: 0 }}
               title={note.pinned ? 'Desafixar' : 'Afixar'}
             >
               {note.pinned ? '📌' : '📍'}
@@ -428,14 +390,11 @@ function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
             <div
               onClick={() => setIsExpanded(!isExpanded)}
               style={{
-                color: 'var(--text-1)',
-                lineHeight: '1.4',
+                color: 'var(--text-1)', lineHeight: '1.4',
                 display: isExpanded ? 'block' : '-webkit-box',
                 WebkitLineClamp: isExpanded ? 'unset' : 2,
                 WebkitBoxOrient: 'vertical',
-                overflow: 'hidden',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
+                overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                 cursor: 'pointer',
               }}
             >
@@ -443,21 +402,14 @@ function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
             </div>
           ) : (
             <textarea
-              autoFocus
-              value={editContent}
+              autoFocus value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
               onClick={(e) => e.stopPropagation()}
               style={{
-                width: '100%', 
-                padding: 8, 
-                border: '1px solid var(--primary)',
-                borderRadius: 4, 
-                fontSize: 11, 
-                fontFamily: 'inherit',
-                minHeight: 60, 
-                resize: 'vertical', 
-                background: 'white',
-                color: '#333',
+                width: '100%', padding: 8,
+                border: '1px solid var(--primary)', borderRadius: 4,
+                fontSize: 11, fontFamily: 'inherit',
+                minHeight: 60, resize: 'vertical', background: 'white', color: '#333',
               }}
             />
           )}
@@ -469,67 +421,26 @@ function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
               <button
                 onClick={(e) => { e.stopPropagation(); handleSave(); }}
                 title="Salvar"
-                style={{
-                  background: 'var(--primary)', 
-                  color: 'white', 
-                  border: 'none',
-                  borderRadius: 4, 
-                  padding: '5px 8px', 
-                  fontSize: 11, 
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                }}
-              >
-                ✓
-              </button>
+                style={{ background: 'var(--primary)', color: 'white', border: 'none', borderRadius: 4, padding: '5px 8px', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}
+              >✓</button>
               <button
                 onClick={(e) => { e.stopPropagation(); setIsEditing(false); setEditContent(note.content); }}
                 title="Cancelar"
-                style={{
-                  background: 'var(--hairline)', 
-                  color: 'var(--text-2)', 
-                  border: 'none',
-                  borderRadius: 4, 
-                  padding: '5px 8px', 
-                  fontSize: 11, 
-                  cursor: 'pointer',
-                }}
-              >
-                ✕
-              </button>
+                style={{ background: 'var(--hairline)', color: 'var(--text-2)', border: 'none', borderRadius: 4, padding: '5px 8px', fontSize: 11, cursor: 'pointer' }}
+              >✕</button>
             </>
           ) : (
             <>
               <button
                 onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
                 title="Editar"
-                style={{
-                  background: 'none', 
-                  border: 'none', 
-                  fontSize: 12, 
-                  cursor: 'pointer', 
-                  padding: '4px 6px',
-                  color: colorData.border,
-                  opacity: 0.8,
-                }}
-              >
-                ✎
-              </button>
+                style={{ background: 'none', border: 'none', fontSize: 12, cursor: 'pointer', padding: '4px 6px', color: colorData.border, opacity: 0.8 }}
+              >✎</button>
               <button
                 onClick={(e) => { e.stopPropagation(); onDelete(); }}
                 title="Deletar"
-                style={{
-                  background: 'none', 
-                  border: 'none', 
-                  fontSize: 12, 
-                  cursor: 'pointer', 
-                  padding: '4px 6px',
-                  color: '#E94B3C',
-                  opacity: 0.8,
-                }}
-              >
-                ✕
-              </button>
+                style={{ background: 'none', border: 'none', fontSize: 12, cursor: 'pointer', padding: '4px 6px', color: '#E94B3C', opacity: 0.8 }}
+              >✕</button>
             </>
           )}
         </div>
