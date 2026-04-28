@@ -1,4 +1,4 @@
-// ferstudy/app.jsx — app que não fica travado
+// ferstudy/app.jsx — app otimizado para VERCEL
 
 const { useState: uS, useMemo, useEffect: uE } = React;
 
@@ -24,56 +24,86 @@ function App() {
   const [password, setPassword] = uS('');
   const [isSignup, setIsSignup] = uS(false);
   const [authError, setAuthError] = uS('');
+  const [firebaseReady, setFirebaseReady] = uS(false);
 
-  // Escutar mudanças de autenticação - CORRIGIDO
+  // Aguardar Firebase estar pronto - OTIMIZADO PARA VERCEL
   uE(() => {
-    console.log("🔍 Configurando listener de autenticação...");
+    console.log("🔍 [APP] Esperando Firebase estar pronto...");
     
-    const timeout = setTimeout(() => {
-      console.warn("⚠️ Firebase demorou muito, continuando sem autenticação");
-      setLoading(false);
-    }, 5000);
+    let mounted = true;
+    let timeout;
 
-    if (!window.auth) {
-      console.warn("⚠️ window.auth não disponível ainda");
-      return () => clearTimeout(timeout);
-    }
+    const waitForFirebase = async () => {
+      // Aguardar até 15 segundos
+      let attempts = 0;
+      const maxAttempts = 150; // 15 segundos (150 * 100ms)
 
-    try {
-      const unsubscribe = window.auth.onAuthStateChanged(
-        (currentUser) => {
-          console.log("👤 Estado de autenticação:", currentUser ? currentUser.email : "não autenticado");
-          setUser(currentUser);
+      while (attempts < maxAttempts && mounted) {
+        if (window.firebaseReady && window.auth && window.db) {
+          console.log("✅ [APP] Firebase pronto!");
+          setFirebaseReady(true);
           setLoading(false);
-          clearTimeout(timeout);
-        },
-        (error) => {
-          console.error("Erro ao escutar autenticação:", error);
-          setLoading(false);
-          clearTimeout(timeout);
+          return;
         }
-      );
+        attempts++;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
 
-      return () => {
-        console.log("🧹 Removendo listener de autenticação");
-        unsubscribe();
-        clearTimeout(timeout);
-      };
-    } catch (error) {
-      console.error("Erro ao configurar listener:", error);
-      setLoading(false);
-      clearTimeout(timeout);
-    }
+      if (mounted) {
+        console.warn("⚠️ [APP] Firebase não ficou pronto em 15 segundos, continuando mesmo assim...");
+        setFirebaseReady(window.firebaseReady || false);
+        setLoading(false);
+      }
+    };
+
+    waitForFirebase();
+
+    return () => {
+      mounted = false;
+      if (timeout) clearTimeout(timeout);
+    };
   }, []);
 
-  // Funções de autenticação - CORRIGIDAS
+  // Escutar mudanças de autenticação - APÓS Firebase estar pronto
+  uE(() => {
+    if (!firebaseReady || !window.auth) {
+      console.warn("⚠️ [APP] Firebase não está pronto ou auth não existe");
+      return;
+    }
+
+    console.log("👤 [APP] Configurando listener de autenticação...");
+
+    let unsubscribe;
+    try {
+      unsubscribe = window.auth.onAuthStateChanged(
+        (currentUser) => {
+          console.log("👤 [APP] Estado de autenticação:", currentUser ? currentUser.email : "não autenticado");
+          setUser(currentUser);
+        },
+        (error) => {
+          console.error("❌ [APP] Erro ao escutar autenticação:", error);
+        }
+      );
+    } catch (error) {
+      console.error("❌ [APP] Erro ao configurar listener:", error);
+    }
+
+    return () => {
+      if (unsubscribe) {
+        console.log("🧹 [APP] Removendo listener de autenticação");
+        unsubscribe();
+      }
+    };
+  }, [firebaseReady]);
+
+  // Funções de autenticação
   const handleSignup = async (e) => {
     e.preventDefault();
     setAuthError('');
     
     if (!window.auth) {
-      setAuthError('❌ Firebase não inicializado. Recarregue a página.');
-      console.error("Auth não disponível");
+      setAuthError('❌ Firebase não inicializado. Tente recarregar.');
+      console.error("❌ window.auth não disponível");
       return;
     }
 
@@ -88,21 +118,21 @@ function App() {
     }
 
     try {
-      console.log("📝 Tentando registrar:", email);
+      console.log("📝 [AUTH] Tentando registrar:", email);
       const userCredential = await window.auth.createUserWithEmailAndPassword(email, password);
-      console.log("✅ Usuário criado:", userCredential.user.uid);
+      console.log("✅ [AUTH] Usuário criado:", userCredential.user.uid);
       setEmail('');
       setPassword('');
       setIsSignup(false);
       setAuthError('');
     } catch (error) {
-      console.error('Erro signup:', error.code, error.message);
+      console.error('❌ [AUTH] Erro signup:', error.code, error.message);
       
       const errorMap = {
         'auth/email-already-in-use': 'Este e-mail já está registrado',
         'auth/invalid-email': 'E-mail inválido',
         'auth/weak-password': 'Senha muito fraca (mín. 6 caracteres)',
-        'auth/operation-not-allowed': 'Registros desativados. Contate o admin.',
+        'auth/operation-not-allowed': 'Registros desativados. Ative no Firebase Console.',
         'auth/network-request-failed': 'Erro de conexão. Verifique sua internet.',
       };
       
@@ -116,8 +146,8 @@ function App() {
     setAuthError('');
     
     if (!window.auth) {
-      setAuthError('❌ Firebase não inicializado. Recarregue a página.');
-      console.error("Auth não disponível");
+      setAuthError('❌ Firebase não inicializado. Tente recarregar.');
+      console.error("❌ window.auth não disponível");
       return;
     }
 
@@ -127,14 +157,14 @@ function App() {
     }
 
     try {
-      console.log("🔐 Tentando login:", email);
+      console.log("🔐 [AUTH] Tentando login:", email);
       const userCredential = await window.auth.signInWithEmailAndPassword(email, password);
-      console.log("✅ Login bem-sucedido:", userCredential.user.uid);
+      console.log("✅ [AUTH] Login bem-sucedido:", userCredential.user.uid);
       setEmail('');
       setPassword('');
       setAuthError('');
     } catch (error) {
-      console.error('Erro login:', error.code, error.message);
+      console.error('❌ [AUTH] Erro login:', error.code, error.message);
       
       const errorMap = {
         'auth/user-not-found': 'Usuário não encontrado',
@@ -159,7 +189,7 @@ function App() {
       setPassword('');
       setAuthError('');
     } catch (error) {
-      console.error('Erro logout:', error);
+      console.error('❌ [AUTH] Erro logout:', error);
     }
   };
 
@@ -195,7 +225,7 @@ function App() {
             .collection('events')
             .doc(String(event.id))
             .set(event)
-            .catch((error) => console.error('Erro salvar:', error));
+            .catch((error) => console.error('❌ Erro salvar:', error));
         });
       }
     } catch (_) {}
@@ -285,7 +315,7 @@ function App() {
         .collection('events')
         .doc(String(id))
         .delete()
-        .catch((error) => console.error('Erro deletar:', error));
+        .catch((error) => console.error('❌ Erro deletar:', error));
     }
     setModalOpen(false);
   };
@@ -386,6 +416,12 @@ function App() {
             <p style={{ margin: 0, color: '#64748b', fontSize: 14 }}>Calendário de estudos</p>
           </div>
 
+          {!firebaseReady && (
+            <div style={{ background: '#fef3c7', color: '#92400e', padding: '12px 14px', borderRadius: 10, fontSize: 13, marginBottom: 16, border: '1px solid #fcd34d' }}>
+              ⏳ Inicializando Firebase...
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
             <button onClick={() => { setIsSignup(false); setAuthError(''); }} style={{
               flex: 1, padding: '10px', border: 'none',
@@ -406,6 +442,7 @@ function App() {
               <label style={{ display: 'block', marginBottom: 8, fontSize: 13, fontWeight: 600, color: '#334155' }}>E-mail</label>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seu@email.com"
                 style={{ width: '100%', padding: '12px 14px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 14, color: '#1e293b', background: '#ffffff' }}
+                disabled={!firebaseReady}
                 onFocus={(e) => e.target.style.borderColor = '#667eea'}
                 onBlur={(e) => e.target.style.borderColor = '#e2e8f0'} />
             </div>
@@ -414,16 +451,17 @@ function App() {
               <label style={{ display: 'block', marginBottom: 8, fontSize: 13, fontWeight: 600, color: '#334155' }}>Senha</label>
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres"
                 style={{ width: '100%', padding: '12px 14px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 14, color: '#1e293b', background: '#ffffff' }}
+                disabled={!firebaseReady}
                 onFocus={(e) => e.target.style.borderColor = '#667eea'}
                 onBlur={(e) => e.target.style.borderColor = '#e2e8f0'} />
             </div>
 
             {authError && <div style={{ background: '#fee2e2', color: '#991b1b', padding: '12px 14px', borderRadius: 10, fontSize: 13, marginBottom: 16 }}>⚠️ {authError}</div>}
 
-            <button type="submit" style={{
+            <button type="submit" disabled={!firebaseReady} style={{
               width: '100%', padding: '12px 16px',
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              color: 'white', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer',
+              background: firebaseReady ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : '#ccc',
+              color: 'white', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: firebaseReady ? 'pointer' : 'not-allowed',
             }}>{isSignup ? 'Criar conta' : 'Entrar'}</button>
           </form>
 
