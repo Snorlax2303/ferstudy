@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Debug Firebase</title>
+<style>
+  body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #fff; }
+  .section { margin: 20px 0; padding: 15px; background: #222; border-left: 4px solid #667eea; }
+  h2 { color: #667eea; margin-top: 0; }
+  code { background: #000; padding: 5px; border-radius: 3px; display: block; margin: 10px 0; white-space: pre-wrap; word-break: break-all; }
+  .ok { color: #4ade80; }
+  .error { color: #ef4444; }
+</style>
+</head>
+<body>
+
+<h1>🔧 Debug Firebase - Diagnóstico Extremo</h1>
+
+<div class="section">
+  <h2>1️⃣ Antes de carregar Firebase</h2>
+  <p>typeof firebase = <code id="before"></code></p>
+</div>
+
+<div class="section">
+  <h2>2️⃣ Testando cada script...</h2>
+  <p id="script-status"></p>
+</div>
+
+<div class="section">
+  <h2>3️⃣ Depois de carregar Firebase</h2>
+  <p>typeof firebase = <code id="after"></code></p>
+</div>
+
+<div class="section">
+  <h2>4️⃣ Tentando inicializar</h2>
+  <p id="init-result"></p>
+</div>
+
+<div class="section">
+  <h2>5️⃣ Status Final</h2>
+  <p>window.db = <code id="db-status"></code></p>
+  <p>window.auth = <code id="auth-status"></code></p>
+  <p>window.firebaseReady = <code id="ready-status"></code></p>
+</div>
+
+<div class="section">
+  <h2>6️⃣ Logs do Console</h2>
+  <p>Abra DevTools (F12) → Console para ver detalhes</p>
+</div>
+
+<script>
+  console.clear();
+  console.log("=== INICIANDO DEBUG ===");
+  
+  // 1. Antes de carregar
+  console.log("Antes de carregar Firebase:");
+  console.log("typeof firebase:", typeof firebase);
+  document.getElementById('before').textContent = typeof firebase;
+  document.getElementById('before').className = typeof firebase === 'undefined' ? 'error' : 'ok';
+  
+  // Monitorar carregamento de scripts
+  document.addEventListener('DOMContentLoaded', () => {
+    console.log("DOMContentLoaded acionado");
+  });
+  
+  window.addEventListener('load', () => {
+    console.log("Window.load acionado");
+  });
+</script>
+
+<!-- Script 1: Firebase App -->
+<script>
+  console.log("⏳ Carregando firebase-app.js...");
+</script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js" onload="console.log('✅ firebase-app.js carregou')" onerror="console.error('❌ ERRO ao carregar firebase-app.js')"></script>
+<script>
+  console.log("Após firebase-app.js: typeof firebase =", typeof firebase);
+  document.getElementById('script-status').innerHTML = '<span class="' + (typeof firebase !== 'undefined' ? 'ok' : 'error') + '">firebase-app.js: ' + (typeof firebase !== 'undefined' ? '✅ OK' : '❌ FALHOU') + '</span><br>';
+</script>
+
+<!-- Script 2: Firestore -->
+<script>
+  console.log("⏳ Carregando firebase-firestore.js...");
+</script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js" onload="console.log('✅ firebase-firestore.js carregou')" onerror="console.error('❌ ERRO ao carregar firebase-firestore.js')"></script>
+<script>
+  console.log("Após firebase-firestore.js: typeof firebase.firestore =", typeof firebase !== 'undefined' ? typeof firebase.firestore : 'firebase não existe');
+  document.getElementById('script-status').innerHTML += '<span class="' + (typeof firebase !== 'undefined' && typeof firebase.firestore === 'function' ? 'ok' : 'error') + '">firebase-firestore.js: ' + (typeof firebase !== 'undefined' && typeof firebase.firestore === 'function' ? '✅ OK' : '❌ FALHOU') + '</span><br>';
+</script>
+
+<!-- Script 3: Auth -->
+<script>
+  console.log("⏳ Carregando firebase-auth.js...");
+</script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js" onload="console.log('✅ firebase-auth.js carregou')" onerror="console.error('❌ ERRO ao carregar firebase-auth.js')"></script>
+<script>
+  console.log("Após firebase-auth.js: typeof firebase.auth =", typeof firebase !== 'undefined' ? typeof firebase.auth : 'firebase não existe');
+  document.getElementById('script-status').innerHTML += '<span class="' + (typeof firebase !== 'undefined' && typeof firebase.auth === 'function' ? 'ok' : 'error') + '">firebase-auth.js: ' + (typeof firebase !== 'undefined' && typeof firebase.auth === 'function' ? '✅ OK' : '❌ FALHOU') + '</span><br>';
+</script>
+
+<!-- Depois de carregar tudo -->
+<script>
+  console.log("\n=== DEPOIS DE CARREGAR TODOS OS SCRIPTS ===");
+  console.log("typeof firebase:", typeof firebase);
+  document.getElementById('after').textContent = typeof firebase;
+  document.getElementById('after').className = typeof firebase !== 'undefined' ? 'ok' : 'error';
+  
+  if (typeof firebase === 'undefined') {
+    console.error("❌ CRITICAL: Firebase não foi carregado!!!");
+    document.getElementById('init-result').innerHTML = '<span class="error">❌ FALHA CRÍTICA: Firebase não está carregado!</span>';
+  } else {
+    console.log("✅ Firebase está disponível, tentando inicializar...");
+    
+    const firebaseConfig = {
+      apiKey: "AIzaSyCrwApr2CdU59OKwtLZKyHOnksy5DqqW7I",
+      authDomain: "ferstudy.firebaseapp.com",
+      projectId: "ferstudy",
+      storageBucket: "ferstudy.firebasestorage.app",
+      messagingSenderId: "815271116137",
+      appId: "1:815271116137:web:38bcb7a2661843b0b491f8",
+      measurementId: "G-3NSWQQYNVY"
+    };
+    
+    try {
+      console.log("Chamando firebase.initializeApp()...");
+      const app = firebase.initializeApp(firebaseConfig);
+      console.log("✅ firebase.initializeApp() sucesso!");
+      
+      console.log("Acessando firestore...");
+      window.db = firebase.firestore();
+      console.log("✅ Firestore OK!");
+      
+      console.log("Acessando auth...");
+      window.auth = firebase.auth();
+      console.log("✅ Auth OK!");
+      
+      window.firebaseReady = true;
+      document.getElementById('init-result').innerHTML = '<span class="ok">✅ Firebase inicializado com sucesso!</span>';
+      
+    } catch (error) {
+      console.error("❌ Erro ao inicializar:", error.message);
+      document.getElementById('init-result').innerHTML = '<span class="error">❌ Erro: ' + error.message + '</span>';
+    }
+  }
+  
+  // Status final
+  document.getElementById('db-status').textContent = typeof window.db;
+  document.getElementById('db-status').className = typeof window.db !== 'undefined' ? 'ok' : 'error';
+  
+  document.getElementById('auth-status').textContent = typeof window.auth;
+  document.getElementById('auth-status').className = typeof window.auth !== 'undefined' ? 'ok' : 'error';
+  
+  document.getElementById('ready-status').textContent = window.firebaseReady || false;
+  document.getElementById('ready-status').className = window.firebaseReady ? 'ok' : 'error';
+  
+  console.log("\n=== STATUS FINAL ===");
+  console.log("window.db:", typeof window.db);
+  console.log("window.auth:", typeof window.auth);
+  console.log("window.firebaseReady:", window.firebaseReady);
+</script>
+
+</body>
+</html>
