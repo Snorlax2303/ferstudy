@@ -1,5 +1,5 @@
 // ferstudy/firebase-config.js
-// ✅ Firebase com inicialização robusta e completa
+// ✅ Firebase com inicialização robusta - VERSÃO MELHORADA
 
 const firebaseConfig = {
   apiKey: "AIzaSyCrwApr2CdU59OKwtLZKyHOnksy5DqqW7I",
@@ -10,77 +10,115 @@ const firebaseConfig = {
   appId: "1:815271116137:web:38bcb7a2661843b0b491f8"
 };
 
-console.log("📌 Iniciando Firebase...");
+console.log("📌 INICIANDO FIREBASE CONFIG...");
+console.log("Verificando se Firebase está disponível...");
 
-// Aguardar Firebase estar disponível antes de usar
-async function initializeFirebase() {
+// Verificar se Firebase está carregado
+if (typeof firebase === 'undefined') {
+  console.error("❌ Firebase NÃO está carregado! Aguardando...");
+} else {
+  console.log("✅ Firebase detectado imediatamente!");
+}
+
+// Função para tentar inicializar
+function tryInitialize() {
   try {
-    // Aguardar Firebase estar disponível (máx 5 segundos)
-    let attempts = 0;
-    while (typeof firebase === 'undefined' && attempts < 50) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-      attempts++;
-    }
-
+    console.log("🔍 Tentativa de inicializar Firebase...");
+    console.log("typeof firebase:", typeof firebase);
+    
     if (typeof firebase === 'undefined') {
-      throw new Error("Firebase CDN não carregou");
+      console.warn("⚠️ Firebase ainda não disponível");
+      return false;
     }
 
-    console.log("✅ Firebase CDN detectado");
+    // Verificar se já foi inicializado
+    if (firebase.apps && firebase.apps.length > 0) {
+      console.log("ℹ️ Firebase já estava inicializado");
+      window.db = firebase.firestore();
+      window.auth = firebase.auth();
+      console.log("✅ Serviços já prontos!");
+      return true;
+    }
 
     // Inicializar Firebase
-    if (!firebase.apps || firebase.apps.length === 0) {
-      firebase.initializeApp(firebaseConfig);
-      console.log("✅ Firebase app inicializado");
-    } else {
-      console.log("ℹ️ Firebase já estava inicializado");
-    }
+    console.log("🔧 Inicializando Firebase app...");
+    firebase.initializeApp(firebaseConfig);
+    console.log("✅ Firebase app inicializado com sucesso!");
 
     // Acessar serviços
     window.db = firebase.firestore();
     window.auth = firebase.auth();
-    
-    console.log("✅ Firestore e Auth prontos!");
+    console.log("✅ Firestore acessado!");
+    console.log("✅ Auth acessado!");
 
-    // Configurar persistência (salvar login entre recarregar página)
-    try {
-      await window.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-      console.log("✅ Persistência: LOCAL (login mantido entre sessões)");
-    } catch (persistError) {
-      console.warn("⚠️ Persistência LOCAL não disponível, tentando SESSION...", persistError.message);
-      try {
-        await window.auth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
-        console.log("✅ Persistência: SESSION (login mantido nesta sessão)");
-      } catch (sessionError) {
-        console.warn("⚠️ Nenhuma persistência disponível", sessionError.message);
-      }
-    }
+    // Configurar persistência
+    window.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+      .then(() => {
+        console.log("✅ Persistência LOCAL configurada!");
+      })
+      .catch((err) => {
+        console.warn("⚠️ LOCAL persistence falhou, tentando SESSION:", err.code);
+        return window.auth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
+      })
+      .then(() => {
+        console.log("✅ Persistência SESSION configurada!");
+      })
+      .catch((err) => {
+        console.warn("⚠️ SESSION persistence também falhou:", err.code);
+      });
 
-    // Teste de conexão com Firestore
-    try {
-      await window.db.collection("_test").doc("ping").get();
-      console.log("✅ Firestore conectado e respondendo");
-    } catch (firestoreError) {
-      console.warn("⚠️ Firestore respondeu com erro (normal em teste):", firestoreError.code);
-    }
-
+    console.log("🚀 FIREBASE INICIALIZADO COM SUCESSO!");
     return true;
+
   } catch (error) {
-    console.error("❌ ERRO CRÍTICO ao inicializar Firebase:", error.message);
-    console.error("Stack:", error.stack);
-    window.db = null;
-    window.auth = null;
+    console.error("❌ ERRO ao inicializar Firebase:", error.message);
+    console.error("Detalhes:", error);
     return false;
   }
 }
 
-// Iniciar imediatamente quando o script carregar
-initializeFirebase().then(success => {
-  if (success) {
-    console.log("🚀 Firebase pronto para usar!");
-  } else {
-    console.error("🚀 Firebase com erro, mas continuando mesmo assim...");
+// Tentar inicializar imediatamente
+console.log("⏳ Tentativa 1: Inicializar imediatamente...");
+if (!tryInitialize()) {
+  // Se não funcionou, esperar um pouco e tentar novamente
+  console.log("⏳ Tentativa 2: Aguardando 500ms...");
+  setTimeout(() => {
+    if (!tryInitialize()) {
+      console.log("⏳ Tentativa 3: Aguardando 1000ms...");
+      setTimeout(() => {
+        if (!tryInitialize()) {
+          console.log("⏳ Tentativa 4: Aguardando 2000ms...");
+          setTimeout(() => {
+            if (!tryInitialize()) {
+              console.error("❌ FALHA CRÍTICA: Firebase não conseguiu inicializar após 4 tentativas!");
+              console.error("Por favor, verifique:");
+              console.error("1. Os scripts do Firebase estão carregando no HTML?");
+              console.error("2. A ordem dos scripts está correta?");
+              console.error("3. Há erro de rede nos DevTools?");
+              console.log("\nWindow.firebase existe?", typeof window.firebase);
+              console.log("Window.auth existe?", typeof window.auth);
+              console.log("Window.db existe?", typeof window.db);
+            }
+          }, 2000);
+        }
+      }, 1000);
+    }
+  }, 500);
+}
+
+// Expor globalmente para debug
+window.firebaseConfig = firebaseConfig;
+window.firebaseDebug = {
+  checkStatus: () => {
+    console.log("=== FIREBASE STATUS ===");
+    console.log("firebase disponível?", typeof firebase !== 'undefined');
+    console.log("window.db disponível?", typeof window.db !== 'undefined');
+    console.log("window.auth disponível?", typeof window.auth !== 'undefined');
+    if (typeof firebase !== 'undefined' && firebase.apps) {
+      console.log("Firebase apps count:", firebase.apps.length);
+      console.log("Firebase apps:", firebase.apps.map(app => app.name));
+    }
   }
-}).catch(err => {
-  console.error("❌ Erro crítico na inicialização:", err);
-});
+};
+
+console.log("📝 Digite 'window.firebaseDebug.checkStatus()' no console para verificar status!");
