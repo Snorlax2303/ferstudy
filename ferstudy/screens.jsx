@@ -111,20 +111,6 @@ function ProgressScreen({ events }) {
           </div>
         ))}
       </div>
-
-      <div className="panel" style={{ marginTop: 14 }}>
-        <h3>Distribuição por tipo</h3>
-        <div className="donut-row">
-          {byCat.map(({cat, count}) => (
-            <div key={cat.id} className="donut-item">
-              <div className="donut" style={{ background: `conic-gradient(${cat.color} ${(count/total*360)}deg, var(--surface-hi) 0)` }}>
-                <div className="donut-inner">{count}</div>
-              </div>
-              <div className="donut-label">{cat.label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
     </ScreenShell>
   );
 }
@@ -270,10 +256,9 @@ function SettingsScreen({ tweaks, setTweak }) {
 }
 
 function CategoriesScreen({ categories, setCategories, events }) {
-  const [editing, setEditing] = React.useState(null); // { id, label, color, mode } | null
+  const [editing, setEditing] = React.useState(null);
   const [confirmDel, setConfirmDel] = React.useState(null);
 
-  // Suggested palette
   const PALETTE = [
     'oklch(0.74 0.14 230)', 'oklch(0.72 0.18 25)',  'oklch(0.78 0.16 80)',
     'oklch(0.74 0.16 145)', 'oklch(0.72 0.18 305)', 'oklch(0.7 0.18 270)',
@@ -426,6 +411,164 @@ function CategoriesScreen({ categories, setCategories, events }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// SUBJECTS MANAGER SCREEN — gerencia matérias dinamicamente
+// ═══════════════════════════════════════════════════════════════════
+function SubjectsManagerScreen({ subjects, setSubjects, events }) {
+  const [editing, setEditing] = React.useState(null); // { name, originalName, mode: 'create'|'edit' }
+  const [confirmDel, setConfirmDel] = React.useState(null);
+
+  const startCreate = () => setEditing({ name: '', mode: 'create' });
+  const startEdit = (name) => setEditing({ name, originalName: name, mode: 'edit' });
+  const cancel = () => setEditing(null);
+
+  // Conta eventos por matéria
+  const counts = React.useMemo(() => {
+    const m = {};
+    for (const e of events) m[e.subject] = (m[e.subject] || 0) + 1;
+    return m;
+  }, [events]);
+
+  const save = () => {
+    const name = (editing.name || '').trim();
+    if (!name) return;
+
+    // Validação: nome único
+    const others = editing.mode === 'edit'
+      ? subjects.filter(s => s !== editing.originalName)
+      : subjects;
+    if (others.includes(name)) {
+      alert('Já existe uma matéria com esse nome.');
+      return;
+    }
+
+    if (editing.mode === 'create') {
+      setSubjects([...subjects, name]);
+    } else {
+      // Renomear: substitui no array E pode opcionalmente atualizar eventos
+      setSubjects(subjects.map(s => s === editing.originalName ? name : s));
+      // Nota: não estamos renomeando os eventos automaticamente.
+      // Se quiser, descomente a linha abaixo para fazer cascade rename:
+      // (precisaria receber setEvents como prop)
+    }
+    setEditing(null);
+  };
+
+  const remove = (name) => {
+    setSubjects(subjects.filter(s => s !== name));
+    setConfirmDel(null);
+  };
+
+  return (
+    <ScreenShell title="Matérias" subtitle="Crie e gerencie as disciplinas do seu calendário">
+      <div className="panel" style={{ marginTop: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <h3 style={{ margin: 0 }}>Suas matérias</h3>
+          <button className="btn-primary cat-add-btn" onClick={startCreate}>
+            <Icon name="plus" size={15} /> Nova matéria
+          </button>
+        </div>
+
+        <div className="cat-list">
+          {subjects.map(s => {
+            const count = counts[s] || 0;
+            return (
+              <div key={s} className="cat-item">
+                <span className="cat-color-chip" style={{ background: 'var(--accent)', display: 'grid', placeItems: 'center', color: '#06080F', fontWeight: 800, fontSize: 14 }}>
+                  {s.charAt(0).toUpperCase()}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="cat-item-label">{s}</div>
+                  <div className="cat-item-meta">{count} {count === 1 ? 'evento' : 'eventos'}</div>
+                </div>
+                <button className="cat-action-btn" onClick={() => startEdit(s)} title="Renomear">
+                  <Icon name="edit" size={14} />
+                </button>
+                <button className="cat-action-btn danger" onClick={() => setConfirmDel(s)} title="Excluir" disabled={subjects.length <= 1}>
+                  <Icon name="trash" size={14} />
+                </button>
+              </div>
+            );
+          })}
+          {subjects.length === 0 && (
+            <p style={{ color: 'var(--text-3)', fontSize: 13, margin: '8px 0' }}>
+              Nenhuma matéria cadastrada. Crie a primeira para começar.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {editing && (
+        <div className="modal-backdrop" onClick={cancel}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 460 }}>
+            <button className="close" onClick={cancel}><Icon name="close" size={16} /></button>
+            <h2>{editing.mode === 'create' ? 'Nova matéria' : 'Renomear matéria'}</h2>
+            <p style={{ margin: '0 0 14px', color: 'var(--text-3)', fontSize: 12.5 }}>
+              {editing.mode === 'create'
+                ? 'Adicione uma disciplina ao seu calendário'
+                : 'Atualize o nome da disciplina'}
+            </p>
+
+            <div className="cat-edit-body">
+              <div className="cat-field">
+                <span>Nome</span>
+                <input
+                  type="text"
+                  value={editing.name}
+                  onChange={e => setEditing({ ...editing, name: e.target.value })}
+                  placeholder="Ex: Matemática Discreta"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === 'Enter') save(); }}
+                />
+              </div>
+
+              {editing.mode === 'edit' && counts[editing.originalName] > 0 && (
+                <div style={{
+                  padding: '10px 12px',
+                  background: 'oklch(0.78 0.16 80 / 0.12)',
+                  border: '1px solid oklch(0.78 0.16 80 / 0.3)',
+                  borderRadius: 8,
+                  fontSize: 12,
+                  color: 'var(--text-2)',
+                  lineHeight: 1.5,
+                }}>
+                  ⚠️ Esta matéria está vinculada a <strong>{counts[editing.originalName]} evento{counts[editing.originalName] !== 1 ? 's' : ''}</strong>. Renomear aqui não atualiza os eventos existentes — eles continuarão com o nome antigo.
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn-ghost" onClick={cancel}>Cancelar</button>
+              <button className="btn-primary" onClick={save} disabled={!editing.name?.trim()}>
+                {editing.mode === 'create' ? 'Criar' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDel && (
+        <div className="modal-backdrop" onClick={() => setConfirmDel(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 380 }}>
+            <button className="close" onClick={() => setConfirmDel(null)}><Icon name="close" size={16} /></button>
+            <h2>Excluir matéria?</h2>
+            <p style={{ padding: '8px 0 18px', color: 'var(--text-2)', fontSize: 13.5, lineHeight: 1.55, margin: 0 }}>
+              {(counts[confirmDel] || 0) > 0
+                ? <>Existem <strong style={{ color: 'var(--text-1)' }}>{counts[confirmDel]} eventos</strong> usando "{confirmDel}". Eles continuarão visíveis, mas a matéria não estará mais disponível para selecionar em novos eventos.</>
+                : <>Tem certeza que deseja excluir <strong style={{ color: 'var(--text-1)' }}>"{confirmDel}"</strong>?</>
+              }
+            </p>
+            <div className="modal-footer">
+              <button className="btn-ghost" onClick={() => setConfirmDel(null)}>Cancelar</button>
+              <button className="btn-danger" onClick={() => remove(confirmDel)}>Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </ScreenShell>
+  );
+}
+
 function HelpScreen() {
   const tips = [
     { k: 'Drag & drop', v: 'Arraste qualquer evento entre dias na visualização Mês.' },
@@ -448,4 +591,4 @@ function HelpScreen() {
   );
 }
 
-Object.assign(window, { HomeScreen, ProgressScreen, InboxScreen, SubjectsScreen, SettingsScreen, HelpScreen, CategoriesScreen });
+Object.assign(window, { HomeScreen, ProgressScreen, InboxScreen, SubjectsScreen, SettingsScreen, HelpScreen, CategoriesScreen, SubjectsManagerScreen });
