@@ -26,20 +26,22 @@ const NOTE_COLORS = [
   { id: 'purple', label: 'Roxo', bg: '#EDE9FE', border: '#C084FC' },
 ];
 
-// Lê notas do localStorage (que é mantido em sync pelo app.jsx via Firestore)
 function loadNotesForDate(dateKey) {
   try {
     const saved = localStorage.getItem(`notes_${dateKey}`);
     return saved ? JSON.parse(saved) : [];
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
-function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
+function EventModal({ event, defaultDate, subjects, onClose, onSave, onDelete }) {
+  // Lista de matérias dinâmica (vem do app via prop) com fallback de segurança
+  const subjectsList = (subjects && subjects.length > 0) ? subjects : SUBJECTS;
+
   const isNew = !event?.id;
   const [title, setTitle] = useState(event?.title || '');
-  const [subject, setSubject] = useState(event?.subject || SUBJECTS[0]);
+  // Se o evento tem uma matéria que não está mais na lista, mantém ela
+  // (não muda o que o usuário já escolheu, mesmo que a matéria tenha sido excluída)
+  const [subject, setSubject] = useState(event?.subject || subjectsList[0] || '');
   const [date, setDate] = useState(event?.date || defaultDate || ymd(FAKE_TODAY));
   const [category, setCategory] = useState(event?.category || 'aula');
   const [start, setStart] = useState(event?.start || '14:00');
@@ -48,12 +50,17 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
   const [note, setNote] = useState(event?.note || '');
   const [completed, setCompleted] = useState(event?.completed || false);
 
-  // Notas do dia atual (carrega do localStorage, que é sincronizado pelo app.jsx)
   const [notes, setNotes] = useState(() => loadNotesForDate(date));
   const [showNotes, setShowNotes] = useState(false);
-
-  // Flag para distinguir mudança vinda do usuário vs vinda da nuvem
   const isLocalChange = useRef(false);
+
+  // Lista do select: une a matéria atual (se for "fantasma", excluída) com a lista oficial
+  const selectOptions = (() => {
+    if (subject && !subjectsList.includes(subject)) {
+      return [subject, ...subjectsList];
+    }
+    return subjectsList;
+  })();
 
   useEffect(() => {
     const onEsc = (e) => { if (e.key === 'Escape') onClose(); };
@@ -61,38 +68,22 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
     return () => window.removeEventListener('keydown', onEsc);
   }, [onClose]);
 
-  // Recarrega notas ao trocar a data do evento
-  useEffect(() => {
-    setNotes(loadNotesForDate(date));
-  }, [date]);
+  useEffect(() => { setNotes(loadNotesForDate(date)); }, [date]);
 
-  // 🔄 Escuta atualizações vindas da nuvem (outros devices)
   useEffect(() => {
     const handleNotesUpdate = () => {
-      // Não recarrega se a mudança veio do próprio modal
-      if (isLocalChange.current) {
-        isLocalChange.current = false;
-        return;
-      }
-      console.log("🔄 [MODAL] Recebendo update de notas da nuvem");
+      if (isLocalChange.current) { isLocalChange.current = false; return; }
       setNotes(loadNotesForDate(date));
     };
     window.addEventListener('notes-updated', handleNotesUpdate);
     return () => window.removeEventListener('notes-updated', handleNotesUpdate);
   }, [date]);
 
-  // 💾 Salva notas: localStorage + Firestore (via window.notesSync)
   useEffect(() => {
     try {
       isLocalChange.current = true;
-
-      if (notes.length > 0) {
-        localStorage.setItem(`notes_${date}`, JSON.stringify(notes));
-      } else {
-        localStorage.removeItem(`notes_${date}`);
-      }
-
-      // Sincroniza com Firestore se usuário estiver logado
+      if (notes.length > 0) localStorage.setItem(`notes_${date}`, JSON.stringify(notes));
+      else localStorage.removeItem(`notes_${date}`);
       if (window.notesSync && window.notesSync.saveNote) {
         window.notesSync.saveNote(date, notes);
       }
@@ -121,9 +112,7 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
   const submit = () => {
     if (!title.trim()) return;
     onSave({
-      id: event?.id,
-      title: title.trim(),
-      subject,
+      id: event?.id, title: title.trim(), subject,
       date, category, start, end,
       location: location.trim() || null,
       note: note.trim() || null,
@@ -151,33 +140,41 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
 
         <div style={{ marginTop: 14 }}>
           <input
-            autoFocus
-            value={title}
+            autoFocus value={title}
             onChange={e => setTitle(e.target.value)}
             placeholder="Título do evento"
             style={{
-              width: '100%', background: 'transparent', border: 0, outline: 0,
-              fontSize: 22, fontWeight: 700, color: 'var(--text-1)',
-              padding: '6px 0 14px',
-              borderBottom: '1px solid var(--hairline)',
-              letterSpacing: '-0.4px',
+              width:'100%', background:'transparent', border:0, outline:0,
+              fontSize:22, fontWeight:700, color:'var(--text-1)',
+              padding:'6px 0 14px', borderBottom:'1px solid var(--hairline)',
+              letterSpacing:'-0.4px',
             }}
           />
         </div>
 
         <div className="field">
           <label>Matéria</label>
-          <select
-            value={subject}
-            onChange={e => setSubject(e.target.value)}
-            style={{
-              background: 'var(--surface-hi)', border: '1px solid var(--hairline)',
-              borderRadius: 10, padding: '7px 12px', fontSize: 13, color: 'var(--text-1)',
-              outline: 0, width: 'auto', cursor: 'pointer',
-            }}
-          >
-            {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
+          {subjectsList.length === 0 ? (
+            <span style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic' }}>
+              Nenhuma matéria cadastrada — adicione na aba "Matérias"
+            </span>
+          ) : (
+            <select
+              value={subject}
+              onChange={e => setSubject(e.target.value)}
+              style={{
+                background:'var(--surface-hi)', border:'1px solid var(--hairline)',
+                borderRadius:10, padding:'7px 12px', fontSize:13, color:'var(--text-1)',
+                outline:0, width:'auto', cursor:'pointer',
+              }}
+            >
+              {selectOptions.map(s => (
+                <option key={s} value={s}>
+                  {s}{!subjectsList.includes(s) ? ' (excluída)' : ''}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         <div className="field">
@@ -190,9 +187,7 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
                   key={c.id}
                   className={'cat-pill' + (active ? ' active' : '')}
                   style={active ? {
-                    '--cp-color': c.soft,
-                    '--cp-border': c.color,
-                    '--cp-text': 'var(--text-1)',
+                    '--cp-color': c.soft, '--cp-border': c.color, '--cp-text': 'var(--text-1)',
                   } : {}}
                   onClick={() => setCategory(c.id)}
                 >
@@ -215,7 +210,7 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
             <TimeStepper which="start" value={start} />
             <span className="time-sep">→</span>
             <TimeStepper which="end" value={end} />
-            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
+            <span style={{ marginLeft:'auto', fontSize:11, color:'var(--text-3)', fontFamily:'JetBrains Mono, monospace' }}>
               {fmtDuration(Math.max(durationMin(start, end), 0))}
             </span>
           </div>
@@ -231,40 +226,29 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
           <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="Adicionar observação" />
         </div>
 
-        <div className="field" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="field" style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <label style={{ margin: 0 }}>✓ Concluído</label>
-          <input type="checkbox" checked={completed} onChange={e => setCompleted(e.target.checked)} style={{ width: 18, height: 18, cursor: 'pointer' }} />
+          <input type="checkbox" checked={completed} onChange={e => setCompleted(e.target.checked)} style={{ width:18, height:18, cursor:'pointer' }} />
         </div>
 
-        {/* Notas */}
-        <div style={{ marginTop: 20, paddingTop: 20, borderTop: '1px solid var(--hairline)' }}>
+        <div style={{ marginTop:20, paddingTop:20, borderTop:'1px solid var(--hairline)' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
-            <label style={{ margin: 0, fontWeight: 600, fontSize: 13 }}>
-              📝 Anotações ({notes.length})
-            </label>
+            <label style={{ margin:0, fontWeight:600, fontSize:13 }}>📝 Anotações ({notes.length})</label>
             <button
               onClick={() => setShowNotes(!showNotes)}
               style={{
                 background: showNotes ? 'var(--text-3)' : 'var(--primary)',
-                color: 'white', border: 'none',
-                borderRadius: 6, padding: '6px 12px', fontSize: 11, fontWeight: 600,
-                cursor: 'pointer', transition: 'all 0.2s',
+                color:'white', border:'none', borderRadius:6, padding:'6px 12px',
+                fontSize:11, fontWeight:600, cursor:'pointer', transition:'all 0.2s',
               }}
             >
               {showNotes ? '✕ Fechar' : '+ Adicionar'}
             </button>
           </div>
-
           {showNotes ? (
-            <NotesPanel
-              notes={notes}
-              onAddNote={addNote}
-              onUpdateNote={updateNote}
-              onDeleteNote={deleteNote}
-              onTogglePin={togglePin}
-            />
+            <NotesPanel notes={notes} onAddNote={addNote} onUpdateNote={updateNote} onDeleteNote={deleteNote} onTogglePin={togglePin} />
           ) : notes.length > 0 ? (
-            <div style={{ fontSize: 11, color: 'var(--text-3)', background: 'var(--surface)', padding: 10, borderRadius: 6, marginBottom: 12 }}>
+            <div style={{ fontSize:11, color:'var(--text-3)', background:'var(--surface)', padding:10, borderRadius:6, marginBottom:12 }}>
               ✓ {notes.length} anotação{notes.length !== 1 ? 'ões' : ''} salva{notes.length !== 1 ? 's' : ''}
             </div>
           ) : null}
@@ -278,7 +262,7 @@ function EventModal({ event, defaultDate, onClose, onSave, onDelete }) {
               </span>
             </button>
           ) : <span />}
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display:'flex', gap:8 }}>
             <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
             <button className="btn btn-primary" onClick={submit}>{isNew ? 'Criar' : 'Salvar'}</button>
           </div>
@@ -298,44 +282,32 @@ function NotesPanel({ notes, onAddNote, onUpdateNote, onDeleteNote, onTogglePin 
 
   return (
     <div style={{
-      background: 'var(--surface-hi)', borderRadius: 8, padding: 0,
-      marginBottom: 12, maxHeight: '400px',
-      display: 'flex', flexDirection: 'column',
-      border: '1px solid var(--hairline)', overflow: 'hidden',
+      background:'var(--surface-hi)', borderRadius:8, padding:0, marginBottom:12,
+      maxHeight:'400px', display:'flex', flexDirection:'column',
+      border:'1px solid var(--hairline)', overflow:'hidden',
     }}>
       <div style={{
-        flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '10px',
-        display: 'flex', gap: '8px', flexDirection: 'column', scrollbarWidth: 'thin',
+        flex:1, overflowY:'auto', overflowX:'hidden', padding:'10px',
+        display:'flex', gap:'8px', flexDirection:'column', scrollbarWidth:'thin',
       }}>
         {sortedNotes.length === 0 ? (
-          <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>
+          <div style={{ padding:'20px 12px', textAlign:'center', color:'var(--text-3)', fontSize:12 }}>
             Nenhuma anotação ainda. Clique em "+ Criar primeira nota" para começar!
           </div>
         ) : (
           sortedNotes.map(note => (
-            <NoteCard
-              key={note.id}
-              note={note}
+            <NoteCard key={note.id} note={note}
               onUpdate={(updates) => onUpdateNote(note.id, updates)}
               onDelete={() => onDeleteNote(note.id)}
-              onTogglePin={() => onTogglePin(note.id)}
-            />
+              onTogglePin={() => onTogglePin(note.id)} />
           ))
         )}
       </div>
-
-      <button
-        onClick={onAddNote}
-        style={{
-          width: '100%', padding: '10px',
-          background: 'var(--primary)', color: 'white',
-          border: 'none', borderTop: '1px solid var(--hairline)',
-          borderRadius: 0, fontSize: 11, fontWeight: 600,
-          cursor: 'pointer', transition: 'all 0.2s',
-        }}
-      >
-        + {sortedNotes.length === 0 ? 'Criar primeira nota' : 'Nova anotação'}
-      </button>
+      <button onClick={onAddNote} style={{
+        width:'100%', padding:'10px', background:'var(--primary)', color:'white',
+        border:'none', borderTop:'1px solid var(--hairline)', borderRadius:0,
+        fontSize:11, fontWeight:600, cursor:'pointer', transition:'all 0.2s',
+      }}>+ {sortedNotes.length === 0 ? 'Criar primeira nota' : 'Nova anotação'}</button>
     </div>
   );
 }
@@ -349,10 +321,7 @@ function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const colorData = NOTE_COLORS.find(c => c.id === note.color) || NOTE_COLORS[0];
 
-  const handleSave = () => {
-    onUpdate({ content: editContent });
-    setIsEditing(false);
-  };
+  const handleSave = () => { onUpdate({ content: editContent }); setIsEditing(false); };
 
   const timeAgo = (() => {
     const diff = new Date() - new Date(note.updatedAt);
@@ -365,82 +334,51 @@ function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
   })();
 
   return (
-    <div
-      style={{
-        background: colorData.bg,
-        borderLeft: `4px solid ${colorData.border}`,
-        borderRadius: 6, padding: '10px',
-        cursor: 'pointer', transition: 'all 0.2s', fontSize: 12,
-      }}
-    >
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap: 8 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display:'flex', alignItems:'center', gap: 6, marginBottom: 6 }}>
-            <button
-              onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
-              style={{ background:'none', border:'none', fontSize:13, cursor:'pointer', padding: 0 }}
-              title={note.pinned ? 'Desafixar' : 'Afixar'}
-            >
-              {note.pinned ? '📌' : '📍'}
-            </button>
-            <span style={{ fontSize: 10, color: 'var(--text-3)', opacity: 0.7 }}>{timeAgo}</span>
+    <div style={{
+      background: colorData.bg, borderLeft:`4px solid ${colorData.border}`,
+      borderRadius:6, padding:'10px', cursor:'pointer', transition:'all 0.2s', fontSize:12,
+    }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8 }}>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:6 }}>
+            <button onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
+              style={{ background:'none', border:'none', fontSize:13, cursor:'pointer', padding:0 }}
+              title={note.pinned ? 'Desafixar' : 'Afixar'}>{note.pinned ? '📌' : '📍'}</button>
+            <span style={{ fontSize:10, color:'var(--text-3)', opacity:0.7 }}>{timeAgo}</span>
           </div>
-
           {!isEditing ? (
-            <div
-              onClick={() => setIsExpanded(!isExpanded)}
-              style={{
-                color: 'var(--text-1)', lineHeight: '1.4',
-                display: isExpanded ? 'block' : '-webkit-box',
-                WebkitLineClamp: isExpanded ? 'unset' : 2,
-                WebkitBoxOrient: 'vertical',
-                overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                cursor: 'pointer',
-              }}
-            >
-              {note.content || '(nota vazia)'}
-            </div>
+            <div onClick={() => setIsExpanded(!isExpanded)} style={{
+              color:'var(--text-1)', lineHeight:'1.4',
+              display: isExpanded ? 'block' : '-webkit-box',
+              WebkitLineClamp: isExpanded ? 'unset' : 2,
+              WebkitBoxOrient:'vertical', overflow:'hidden',
+              whiteSpace:'pre-wrap', wordBreak:'break-word', cursor:'pointer',
+            }}>{note.content || '(nota vazia)'}</div>
           ) : (
-            <textarea
-              autoFocus value={editContent}
+            <textarea autoFocus value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
               onClick={(e) => e.stopPropagation()}
               style={{
-                width: '100%', padding: 8,
-                border: '1px solid var(--primary)', borderRadius: 4,
-                fontSize: 11, fontFamily: 'inherit',
-                minHeight: 60, resize: 'vertical', background: 'white', color: '#333',
-              }}
-            />
+                width:'100%', padding:8, border:'1px solid var(--primary)', borderRadius:4,
+                fontSize:11, fontFamily:'inherit', minHeight:60, resize:'vertical',
+                background:'white', color:'#333',
+              }} />
           )}
         </div>
-
-        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+        <div style={{ display:'flex', gap:4, flexShrink:0 }}>
           {isEditing ? (
             <>
-              <button
-                onClick={(e) => { e.stopPropagation(); handleSave(); }}
-                title="Salvar"
-                style={{ background: 'var(--primary)', color: 'white', border: 'none', borderRadius: 4, padding: '5px 8px', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}
-              >✓</button>
-              <button
-                onClick={(e) => { e.stopPropagation(); setIsEditing(false); setEditContent(note.content); }}
-                title="Cancelar"
-                style={{ background: 'var(--hairline)', color: 'var(--text-2)', border: 'none', borderRadius: 4, padding: '5px 8px', fontSize: 11, cursor: 'pointer' }}
-              >✕</button>
+              <button onClick={(e) => { e.stopPropagation(); handleSave(); }} title="Salvar"
+                style={{ background:'var(--primary)', color:'white', border:'none', borderRadius:4, padding:'5px 8px', fontSize:11, cursor:'pointer', fontWeight:600 }}>✓</button>
+              <button onClick={(e) => { e.stopPropagation(); setIsEditing(false); setEditContent(note.content); }} title="Cancelar"
+                style={{ background:'var(--hairline)', color:'var(--text-2)', border:'none', borderRadius:4, padding:'5px 8px', fontSize:11, cursor:'pointer' }}>✕</button>
             </>
           ) : (
             <>
-              <button
-                onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-                title="Editar"
-                style={{ background: 'none', border: 'none', fontSize: 12, cursor: 'pointer', padding: '4px 6px', color: colorData.border, opacity: 0.8 }}
-              >✎</button>
-              <button
-                onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                title="Deletar"
-                style={{ background: 'none', border: 'none', fontSize: 12, cursor: 'pointer', padding: '4px 6px', color: '#E94B3C', opacity: 0.8 }}
-              >✕</button>
+              <button onClick={(e) => { e.stopPropagation(); setIsEditing(true); }} title="Editar"
+                style={{ background:'none', border:'none', fontSize:12, cursor:'pointer', padding:'4px 6px', color:colorData.border, opacity:0.8 }}>✎</button>
+              <button onClick={(e) => { e.stopPropagation(); onDelete(); }} title="Deletar"
+                style={{ background:'none', border:'none', fontSize:12, cursor:'pointer', padding:'4px 6px', color:'#E94B3C', opacity:0.8 }}>✕</button>
             </>
           )}
         </div>
