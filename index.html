@@ -11,36 +11,28 @@
 <div id="root"></div>
 
 <!-- React -->
-<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
 
-<!-- Firebase CDN (IMPORTANTE - CARREGAR ANTES DO RESTO) -->
-<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js"></script>
+<!-- Firebase CDN (versão COMPAT — cria o objeto global `firebase`) -->
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
 
-<!-- Aguardar Firebase carregar -->
 <script>
-  // Aguardar Firebase estar disponível
-  function waitForFirebase() {
-    return new Promise((resolve) => {
-      if (typeof firebase !== 'undefined') {
-        resolve();
-      } else {
-        setTimeout(() => waitForFirebase().then(resolve), 100);
-      }
-    });
+  console.log("⏳ Verificando Firebase compat...");
+  if (typeof firebase !== 'undefined') {
+    console.log("✅ Firebase CDN (compat) carregado!");
+  } else {
+    console.error("❌ Firebase compat NÃO carregou — verifique sua conexão / bloqueadores.");
   }
-  
-  console.log("⏳ Aguardando Firebase...");
-  waitForFirebase().then(() => {
-    console.log("✅ Firebase CDN carregado!");
-  });
 </script>
 
-<!-- Arquivos do app (ORDEM IMPORTANTE) -->
-<script type="text/babel" src="ferstudy/firebase-config.js"></script>
+<!-- Firebase config NÃO precisa do Babel (é JS puro) -->
+<script src="ferstudy/firebase-config.js"></script>
+
+<!-- Arquivos JSX do app (precisam do Babel) -->
 <script type="text/babel" src="ferstudy/data.jsx"></script>
 <script type="text/babel" src="ferstudy/icons.jsx"></script>
 <script type="text/babel" src="ferstudy/tweaks-panel.jsx"></script>
