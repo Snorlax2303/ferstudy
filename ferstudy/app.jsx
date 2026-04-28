@@ -25,46 +25,55 @@ function App() {
   const [isSignup, setIsSignup] = uS(false);
   const [authError, setAuthError] = uS('');
 
-  // Escutar mudanças de autenticação - com timeout
+  // Escutar mudanças de autenticação - CORRIGIDO
   uE(() => {
+    console.log("🔍 Configurando listener de autenticação...");
+    
     const timeout = setTimeout(() => {
-      // Se Firebase não carregou em 3 segundos, deixar ir mesmo assim
-      if (!window.auth) {
-        console.warn("⚠️ Firebase não carregou, continuando sem autenticação");
-        setLoading(false);
-        return;
-      }
-
-      const unsubscribe = window.auth.onAuthStateChanged((currentUser) => {
-        setUser(currentUser);
-        setLoading(false);
-      }, (error) => {
-        console.error("Erro de autenticação:", error);
-        setLoading(false);
-      });
-
-      return () => unsubscribe();
-    }, 500);
-
-    return () => clearTimeout(timeout);
-  }, []);
-
-  // Forçar sair da tela de loading após 5 segundos
-  uE(() => {
-    const forceTimeout = setTimeout(() => {
+      console.warn("⚠️ Firebase demorou muito, continuando sem autenticação");
       setLoading(false);
     }, 5000);
 
-    return () => clearTimeout(forceTimeout);
+    if (!window.auth) {
+      console.warn("⚠️ window.auth não disponível ainda");
+      return () => clearTimeout(timeout);
+    }
+
+    try {
+      const unsubscribe = window.auth.onAuthStateChanged(
+        (currentUser) => {
+          console.log("👤 Estado de autenticação:", currentUser ? currentUser.email : "não autenticado");
+          setUser(currentUser);
+          setLoading(false);
+          clearTimeout(timeout);
+        },
+        (error) => {
+          console.error("Erro ao escutar autenticação:", error);
+          setLoading(false);
+          clearTimeout(timeout);
+        }
+      );
+
+      return () => {
+        console.log("🧹 Removendo listener de autenticação");
+        unsubscribe();
+        clearTimeout(timeout);
+      };
+    } catch (error) {
+      console.error("Erro ao configurar listener:", error);
+      setLoading(false);
+      clearTimeout(timeout);
+    }
   }, []);
 
-  // Funções de autenticação
+  // Funções de autenticação - CORRIGIDAS
   const handleSignup = async (e) => {
     e.preventDefault();
     setAuthError('');
     
     if (!window.auth) {
-      setAuthError('Autenticação não disponível. Recarregue a página.');
+      setAuthError('❌ Firebase não inicializado. Recarregue a página.');
+      console.error("Auth não disponível");
       return;
     }
 
@@ -79,21 +88,26 @@ function App() {
     }
 
     try {
-      await window.auth.createUserWithEmailAndPassword(email, password);
+      console.log("📝 Tentando registrar:", email);
+      const userCredential = await window.auth.createUserWithEmailAndPassword(email, password);
+      console.log("✅ Usuário criado:", userCredential.user.uid);
       setEmail('');
       setPassword('');
       setIsSignup(false);
+      setAuthError('');
     } catch (error) {
-      console.error('Erro signup:', error.code);
-      if (error.code === 'auth/email-already-in-use') {
-        setAuthError('Este e-mail já está registrado');
-      } else if (error.code === 'auth/invalid-email') {
-        setAuthError('E-mail inválido');
-      } else if (error.code === 'auth/weak-password') {
-        setAuthError('Senha muito fraca');
-      } else {
-        setAuthError('Erro: ' + error.message);
-      }
+      console.error('Erro signup:', error.code, error.message);
+      
+      const errorMap = {
+        'auth/email-already-in-use': 'Este e-mail já está registrado',
+        'auth/invalid-email': 'E-mail inválido',
+        'auth/weak-password': 'Senha muito fraca (mín. 6 caracteres)',
+        'auth/operation-not-allowed': 'Registros desativados. Contate o admin.',
+        'auth/network-request-failed': 'Erro de conexão. Verifique sua internet.',
+      };
+      
+      const mensagem = errorMap[error.code] || `Erro: ${error.message}`;
+      setAuthError(mensagem);
     }
   };
 
@@ -102,7 +116,8 @@ function App() {
     setAuthError('');
     
     if (!window.auth) {
-      setAuthError('Autenticação não disponível. Recarregue a página.');
+      setAuthError('❌ Firebase não inicializado. Recarregue a página.');
+      console.error("Auth não disponível");
       return;
     }
 
@@ -112,18 +127,26 @@ function App() {
     }
 
     try {
-      await window.auth.signInWithEmailAndPassword(email, password);
+      console.log("🔐 Tentando login:", email);
+      const userCredential = await window.auth.signInWithEmailAndPassword(email, password);
+      console.log("✅ Login bem-sucedido:", userCredential.user.uid);
       setEmail('');
       setPassword('');
+      setAuthError('');
     } catch (error) {
-      console.error('Erro login:', error.code);
-      if (error.code === 'auth/user-not-found') {
-        setAuthError('Usuário não encontrado');
-      } else if (error.code === 'auth/wrong-password') {
-        setAuthError('Senha incorreta');
-      } else {
-        setAuthError('Erro: ' + error.message);
-      }
+      console.error('Erro login:', error.code, error.message);
+      
+      const errorMap = {
+        'auth/user-not-found': 'Usuário não encontrado',
+        'auth/wrong-password': 'Senha incorreta',
+        'auth/invalid-email': 'E-mail inválido',
+        'auth/user-disabled': 'Usuário desativado',
+        'auth/network-request-failed': 'Erro de conexão. Verifique sua internet.',
+        'auth/too-many-requests': 'Muitas tentativas. Tente novamente mais tarde.',
+      };
+      
+      const mensagem = errorMap[error.code] || `Erro: ${error.message}`;
+      setAuthError(mensagem);
     }
   };
 
