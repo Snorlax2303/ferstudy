@@ -10,45 +10,49 @@
 <body data-theme="blue" data-density="comfy">
 <div id="root"></div>
 
-<!-- ============================================ -->
-<!-- ORDEM CRÍTICA - NÃO MUDE! -->
-<!-- ============================================ -->
-
-<!-- 1. React (SEM type="text/babel") -->
+<!-- React -->
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
-
-<!-- 2. Babel (DEPOIS de React) -->
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"></script>
 
-<!-- 3. Firebase CDN (SEM type="text/babel" - NÃO MEXA!) -->
-<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js"></script>
+<!-- Firebase Realtime Database (SIMPLES!) -->
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-compat/app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-compat/auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-compat/database.js"></script>
 
-<!-- 4. Firebase Config (SEM type="text/babel" - NÃO MEXA!) -->
-<script src="ferstudy/firebase-config.js"></script>
+<!-- Inicializar Firebase -->
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyCrwApr2CdU59OKwtLZKyHOnksy5DqqW7I",
+    authDomain: "ferstudy.firebaseapp.com",
+    projectId: "ferstudy",
+    databaseURL: "https://ferstudy-default-rtdb.firebaseio.com",
+    storageBucket: "ferstudy.firebasestorage.app",
+    messagingSenderId: "815271116137",
+    appId: "1:815271116137:web:38bcb7a2661843b0b491f8"
+  };
 
-<!-- 5. Dados e constantes (SEM type="text/babel" - é JS puro) -->
-<script src="ferstudy/data.jsx"></script>
+  console.log("🔥 Inicializando Firebase Realtime Database...");
+  
+  try {
+    firebase.initializeApp(firebaseConfig);
+    window.auth = firebase.auth();
+    window.db = firebase.database();
+    window.firebaseReady = true;
+    console.log("✅ Firebase Realtime Database pronto!");
+  } catch (error) {
+    console.error("❌ Erro:", error.message);
+    window.firebaseReady = false;
+  }
+</script>
 
-<!-- 6. Icons (COM type="text/babel" - usa JSX) -->
+<!-- App scripts -->
+<script type="text/babel" src="ferstudy/data.jsx"></script>
 <script type="text/babel" src="ferstudy/icons.jsx"></script>
-
-<!-- 7. Tweaks Panel (COM type="text/babel" - usa JSX) -->
 <script type="text/babel" src="ferstudy/tweaks-panel.jsx"></script>
-
-<!-- 8. Modal (COM type="text/babel" - usa JSX) -->
 <script type="text/babel" src="ferstudy/modal.jsx"></script>
-
-<!-- 9. Views (COM type="text/babel" - usa JSX) -->
 <script type="text/babel" src="ferstudy/views.jsx"></script>
-
-<!-- 10. Screens (COM type="text/babel" - usa JSX) -->
 <script type="text/babel" src="ferstudy/screens.jsx"></script>
-
-<!-- 11. App (COM type="text/babel" - usa JSX) -->
 <script type="text/babel" src="ferstudy/app.jsx"></script>
-
 </body>
 </html>
