@@ -1,4 +1,4 @@
-// ferstudy/app.jsx — app com sincronização total via Firestore
+// ferstudy/app.jsx — app com sincronização total via Firestore + matérias dinâmicas
 
 const { useState: uS, useMemo, useEffect: uE, useRef: uR } = React;
 
@@ -17,7 +17,7 @@ function App() {
 
   const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
 
-  // Estado de autenticação
+  // Auth
   const [user, setUser] = uS(null);
   const [loading, setLoading] = uS(true);
   const [email, setEmail] = uS('');
@@ -26,24 +26,21 @@ function App() {
   const [authError, setAuthError] = uS('');
   const [firebaseReady, setFirebaseReady] = uS(false);
 
-  // 🔒 Flags de sincronização (evita loops cloud→local→cloud)
+  // Flags de sync
   const isSyncingEvents = uR(false);
   const isSyncingCategories = uR(false);
+  const isSyncingSubjects = uR(false);
   const isSyncingNotes = uR(false);
-  const initialSyncDone = uR({ events: false, categories: false });
+  const initialSyncDone = uR({ events: false, categories: false, subjects: false });
 
-  // Aguardar Firebase estar pronto
+  // Aguardar Firebase
   uE(() => {
-    console.log("🔍 [APP] Esperando Firebase estar pronto...");
     let mounted = true;
-
     const waitForFirebase = async () => {
       let attempts = 0;
       const maxAttempts = 150;
-
       while (attempts < maxAttempts && mounted) {
         if (window.firebaseReady && window.auth && window.db) {
-          console.log("✅ [APP] Firebase pronto!");
           setFirebaseReady(true);
           setLoading(false);
           return;
@@ -51,14 +48,11 @@ function App() {
         attempts++;
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-
       if (mounted) {
-        console.warn("⚠️ [APP] Firebase não ficou pronto em 15s, continuando...");
         setFirebaseReady(window.firebaseReady || false);
         setLoading(false);
       }
     };
-
     waitForFirebase();
     return () => { mounted = false; };
   }, []);
@@ -66,44 +60,32 @@ function App() {
   // Listener de autenticação
   uE(() => {
     if (!firebaseReady || !window.auth) return;
-    console.log("👤 [APP] Configurando listener de autenticação...");
-
     let unsubscribe;
     try {
-      unsubscribe = window.auth.onAuthStateChanged(
-        (currentUser) => {
-          console.log("👤 [APP] Auth state:", currentUser ? currentUser.email : "deslogado");
-          // Reset das flags ao trocar de usuário
-          initialSyncDone.current = { events: false, categories: false };
-          setUser(currentUser);
-        },
-        (error) => console.error("❌ [APP] Erro auth:", error)
-      );
-    } catch (error) {
-      console.error("❌ [APP] Erro listener:", error);
-    }
-
+      unsubscribe = window.auth.onAuthStateChanged((currentUser) => {
+        initialSyncDone.current = { events: false, categories: false, subjects: false };
+        setUser(currentUser);
+      });
+    } catch (error) { console.error("❌ Listener:", error); }
     return () => { if (unsubscribe) unsubscribe(); };
   }, [firebaseReady]);
 
-  // ============ AUTH HANDLERS ============
+  // ============ AUTH ============
   const handleSignup = async (e) => {
     e.preventDefault();
     setAuthError('');
     if (!window.auth) { setAuthError('❌ Firebase não inicializado.'); return; }
     if (!email || !password) { setAuthError('Preencha e-mail e senha'); return; }
     if (password.length < 6) { setAuthError('Senha mín. 6 caracteres'); return; }
-
     try {
-      const userCredential = await window.auth.createUserWithEmailAndPassword(email, password);
-      console.log("✅ [AUTH] Criado:", userCredential.user.uid);
+      await window.auth.createUserWithEmailAndPassword(email, password);
       setEmail(''); setPassword(''); setIsSignup(false); setAuthError('');
     } catch (error) {
       const errorMap = {
         'auth/email-already-in-use': 'Este e-mail já está registrado',
         'auth/invalid-email': 'E-mail inválido',
         'auth/weak-password': 'Senha muito fraca',
-        'auth/operation-not-allowed': 'Registros desativados no Firebase Console.',
+        'auth/operation-not-allowed': 'Registros desativados.',
         'auth/network-request-failed': 'Erro de conexão',
       };
       setAuthError(errorMap[error.code] || `Erro: ${error.message}`);
@@ -115,7 +97,6 @@ function App() {
     setAuthError('');
     if (!window.auth) { setAuthError('❌ Firebase não inicializado.'); return; }
     if (!email || !password) { setAuthError('Preencha e-mail e senha'); return; }
-
     try {
       await window.auth.signInWithEmailAndPassword(email, password);
       setEmail(''); setPassword(''); setAuthError('');
@@ -140,7 +121,7 @@ function App() {
     } catch (error) { console.error('❌ Logout:', error); }
   };
 
-  // Apply tweaks
+  // Tweaks
   uE(() => {
     document.body.dataset.theme = tweaks.theme;
     document.body.dataset.density = tweaks.density;
@@ -159,58 +140,34 @@ function App() {
     } catch (_) { return SEED_EVENTS; }
   });
 
-  // 🔄 SYNC EVENTOS: escuta nuvem → atualiza local
   uE(() => {
     if (!user || !window.db) return;
-    console.log("🔄 [SYNC events] Iniciando listener para", user.email);
-
     const unsubscribe = window.db
       .collection('users').doc(user.uid).collection('events')
       .onSnapshot(
         (snapshot) => {
           const cloudEvents = snapshot.docs.map(doc => doc.data());
-          console.log(`☁️ [SYNC events] ${cloudEvents.length} recebidos da nuvem`);
-
-          // Primeira sincronização: se nuvem vazia, faz upload do local; senão usa nuvem
           if (!initialSyncDone.current.events) {
             initialSyncDone.current.events = true;
-            if (cloudEvents.length === 0) {
-              console.log("⬆️ [SYNC events] Nuvem vazia, mantendo locais para upload");
-              return; // mantém events locais; o useEffect de salvamento vai mandar pra nuvem
-            }
+            if (cloudEvents.length === 0) return;
           }
-
           isSyncingEvents.current = true;
           setEvents(cloudEvents);
-          // Libera a flag depois do próximo ciclo de render
           setTimeout(() => { isSyncingEvents.current = false; }, 100);
         },
         (error) => console.error('❌ [SYNC events]', error)
       );
-
-    return () => {
-      console.log("🧹 [SYNC events] Removendo listener");
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, [user]);
 
-  // 💾 Salvar eventos: localStorage sempre + Firestore se logado
   uE(() => {
     try {
       localStorage.setItem('ferstudy.events', JSON.stringify(events));
-
-      // Pula salvamento se acabamos de receber da nuvem (evita loop)
-      if (isSyncingEvents.current) {
-        console.log("⏭️ [SYNC events] Pulando save (acabou de chegar da nuvem)");
-        return;
-      }
-
+      if (isSyncingEvents.current) return;
       if (user && window.db) {
         const batch = window.db.batch();
         const eventsCol = window.db.collection('users').doc(user.uid).collection('events');
-        events.forEach((event) => {
-          batch.set(eventsCol.doc(String(event.id)), event);
-        });
+        events.forEach((event) => batch.set(eventsCol.doc(String(event.id)), event));
         batch.commit().catch((error) => console.error('❌ Save events:', error));
       }
     } catch (_) {}
@@ -225,23 +182,15 @@ function App() {
     return Object.values(CATEGORIES).map(c => ({ id: c.id, label: c.label, color: c.color }));
   });
 
-  // 🔄 SYNC CATEGORIAS: escuta doc único na nuvem
   uE(() => {
     if (!user || !window.db) return;
-    console.log("🔄 [SYNC categories] Iniciando listener");
-
     const unsubscribe = window.db
       .collection('users').doc(user.uid).collection('settings').doc('categories')
       .onSnapshot(
         (doc) => {
-          if (!doc.exists) {
-            console.log("📝 [SYNC categories] Doc não existe ainda, mantendo locais");
-            initialSyncDone.current.categories = true;
-            return; // useEffect de save vai criar
-          }
+          if (!doc.exists) { initialSyncDone.current.categories = true; return; }
           const data = doc.data();
           if (data && Array.isArray(data.items)) {
-            console.log(`☁️ [SYNC categories] ${data.items.length} recebidas`);
             isSyncingCategories.current = true;
             setCategories(data.items);
             setTimeout(() => { isSyncingCategories.current = false; }, 100);
@@ -250,23 +199,15 @@ function App() {
         },
         (error) => console.error('❌ [SYNC categories]', error)
       );
-
-    return () => {
-      console.log("🧹 [SYNC categories] Removendo listener");
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, [user]);
 
-  // 💾 Salvar categorias
   uE(() => {
     try {
       localStorage.setItem('ferstudy.categories', JSON.stringify(categories));
-
       if (isSyncingCategories.current) return;
-
       if (user && window.db) {
-        window.db
-          .collection('users').doc(user.uid)
+        window.db.collection('users').doc(user.uid)
           .collection('settings').doc('categories')
           .set({ items: categories, updatedAt: Date.now() })
           .catch((error) => console.error('❌ Save categories:', error));
@@ -287,95 +228,97 @@ function App() {
 
   uE(() => { window.CATEGORIES = catMap; }, [catMap]);
 
+  // ============ MATÉRIAS (NOVO) ============
+  const [subjects, setSubjects] = uS(() => {
+    try {
+      const saved = localStorage.getItem('ferstudy.subjects');
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return SUBJECTS;
+  });
+
+  // 🔄 Sync matérias
+  uE(() => {
+    if (!user || !window.db) return;
+    console.log("🔄 [SYNC subjects] Iniciando listener");
+    const unsubscribe = window.db
+      .collection('users').doc(user.uid).collection('settings').doc('subjects')
+      .onSnapshot(
+        (doc) => {
+          if (!doc.exists) {
+            console.log("📝 [SYNC subjects] Doc não existe, mantendo locais");
+            initialSyncDone.current.subjects = true;
+            return;
+          }
+          const data = doc.data();
+          if (data && Array.isArray(data.items)) {
+            console.log(`☁️ [SYNC subjects] ${data.items.length} matérias recebidas`);
+            isSyncingSubjects.current = true;
+            setSubjects(data.items);
+            setTimeout(() => { isSyncingSubjects.current = false; }, 100);
+          }
+          initialSyncDone.current.subjects = true;
+        },
+        (error) => console.error('❌ [SYNC subjects]', error)
+      );
+    return () => unsubscribe();
+  }, [user]);
+
+  // 💾 Salvar matérias
+  uE(() => {
+    try {
+      localStorage.setItem('ferstudy.subjects', JSON.stringify(subjects));
+      if (isSyncingSubjects.current) return;
+      if (user && window.db) {
+        window.db.collection('users').doc(user.uid)
+          .collection('settings').doc('subjects')
+          .set({ items: subjects, updatedAt: Date.now() })
+          .catch((error) => console.error('❌ Save subjects:', error));
+      }
+    } catch (_) {}
+  }, [subjects, user]);
+
   // ============ NOTAS ============
-  // Notas são guardadas por data (notes_YYYY-MM-DD no localStorage; doc por data no Firestore)
-  // Como o modal lê/escreve direto no localStorage por data, expomos sync via window.notesSync
   uE(() => {
     if (!user || !window.db) {
       window.notesSync = null;
       return;
     }
-
-    console.log("🔄 [SYNC notes] Configurando sync de notas");
-
-    // Listener: escuta TODAS as notas do usuário e replica no localStorage
     const unsubscribe = window.db
       .collection('users').doc(user.uid).collection('notes')
       .onSnapshot(
         (snapshot) => {
-          console.log(`☁️ [SYNC notes] ${snapshot.docs.length} dias com notas recebidos`);
           isSyncingNotes.current = true;
-
-          // Pega as datas que têm notas locais para detectar deleções
-          const localNoteKeys = [];
-          for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            if (k && k.startsWith('notes_')) localNoteKeys.push(k);
-          }
-          const cloudKeys = new Set(snapshot.docs.map(d => `notes_${d.id}`));
-
-          // Atualiza/cria notas que estão na nuvem
           snapshot.docs.forEach(doc => {
             const data = doc.data();
             if (data && Array.isArray(data.items)) {
               const key = `notes_${doc.id}`;
-              if (data.items.length > 0) {
-                localStorage.setItem(key, JSON.stringify(data.items));
-              } else {
-                localStorage.removeItem(key);
-              }
+              if (data.items.length > 0) localStorage.setItem(key, JSON.stringify(data.items));
+              else localStorage.removeItem(key);
             }
           });
-
-          // Remove notas locais que foram deletadas da nuvem
-          // (só na primeira sincronização, pra não apagar notas que ainda não subiram)
-          // Aqui assumimos: se a nuvem não tem aquela data, e o snapshot está confirmado,
-          // a nota foi deletada propositalmente em outro device
-          localNoteKeys.forEach(k => {
-            if (!cloudKeys.has(k)) {
-              // Antes de remover, vamos manter — o save abaixo vai subir pra nuvem
-              // Comportamento conservador: só remove se já tivemos sync inicial
-            }
-          });
-
-          // Notifica componentes (modal) que algo mudou
           window.dispatchEvent(new CustomEvent('notes-updated'));
-
           setTimeout(() => { isSyncingNotes.current = false; }, 100);
         },
         (error) => console.error('❌ [SYNC notes]', error)
       );
-
-    // Função para o modal salvar uma nota (será chamada de fora)
     window.notesSync = {
       saveNote: async (dateKey, items) => {
         if (isSyncingNotes.current) return;
         if (!user || !window.db) return;
         try {
           if (items && items.length > 0) {
-            await window.db
-              .collection('users').doc(user.uid)
+            await window.db.collection('users').doc(user.uid)
               .collection('notes').doc(dateKey)
               .set({ items, updatedAt: Date.now() });
-            console.log(`💾 [SYNC notes] Salvou ${items.length} notas em ${dateKey}`);
           } else {
-            await window.db
-              .collection('users').doc(user.uid)
-              .collection('notes').doc(dateKey)
-              .delete();
-            console.log(`🗑️ [SYNC notes] Removeu notas de ${dateKey}`);
+            await window.db.collection('users').doc(user.uid)
+              .collection('notes').doc(dateKey).delete();
           }
-        } catch (error) {
-          console.error('❌ Save note:', error);
-        }
+        } catch (error) { console.error('❌ Save note:', error); }
       }
     };
-
-    return () => {
-      console.log("🧹 [SYNC notes] Removendo listener");
-      window.notesSync = null;
-      unsubscribe();
-    };
+    return () => { window.notesSync = null; unsubscribe(); };
   }, [user]);
 
   // ============ DEMAIS ESTADOS ============
@@ -425,9 +368,8 @@ function App() {
   const deleteEvent = (id) => {
     setEvents(prev => prev.filter(e => e.id !== id));
     if (user && window.db) {
-      window.db
-        .collection('users').doc(user.uid).collection('events').doc(String(id))
-        .delete().catch((error) => console.error('❌ Delete event:', error));
+      window.db.collection('users').doc(user.uid).collection('events').doc(String(id))
+        .delete().catch((error) => console.error('❌ Delete:', error));
     }
     setModalOpen(false);
   };
@@ -450,9 +392,7 @@ function App() {
   }, [view, selected]);
 
   uE(() => {
-    if (view !== 'month') {
-      setCursor(new Date(selected.getFullYear(), selected.getMonth(), 1));
-    }
+    if (view !== 'month') setCursor(new Date(selected.getFullYear(), selected.getMonth(), 1));
   }, [selected, view]);
 
   const greet = (() => {
@@ -470,7 +410,7 @@ function App() {
     return upcoming[0];
   }, [events]);
 
-  // ============ TELA DE LOADING ============
+  // ============ LOADING ============
   if (loading) {
     return (
       <>
@@ -489,7 +429,7 @@ function App() {
     );
   }
 
-  // ============ TELA DE LOGIN ============
+  // ============ LOGIN ============
   if (!user) {
     return (
       <div style={{ display:'flex', justifyContent:'center', alignItems:'center', minHeight:'100vh', background:'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', padding:'20px' }}>
@@ -499,18 +439,15 @@ function App() {
             <h1 style={{ margin:'0 0 8px 0', fontSize:32, color:'#1e293b', fontWeight:800 }}>Ferstudy</h1>
             <p style={{ margin:0, color:'#64748b', fontSize:14 }}>Calendário de estudos</p>
           </div>
-
           {!firebaseReady && (
             <div style={{ background:'#fef3c7', color:'#92400e', padding:'12px 14px', borderRadius:10, fontSize:13, marginBottom:16, border:'1px solid #fcd34d' }}>
               ⏳ Inicializando Firebase...
             </div>
           )}
-
           <div style={{ display:'flex', gap:8, marginBottom:24 }}>
             <button onClick={() => { setIsSignup(false); setAuthError(''); }} style={{ flex:1, padding:'10px', border:'none', background:!isSignup ? '#667eea' : '#f1f5f9', color:!isSignup ? 'white' : '#64748b', borderRadius:8, fontSize:14, fontWeight:600, cursor:'pointer' }}>Entrar</button>
             <button onClick={() => { setIsSignup(true); setAuthError(''); }} style={{ flex:1, padding:'10px', border:'none', background:isSignup ? '#667eea' : '#f1f5f9', color:isSignup ? 'white' : '#64748b', borderRadius:8, fontSize:14, fontWeight:600, cursor:'pointer' }}>Registrar</button>
           </div>
-
           <form onSubmit={isSignup ? handleSignup : handleLogin} style={{ marginBottom:20 }}>
             <div style={{ marginBottom:16 }}>
               <label style={{ display:'block', marginBottom:8, fontSize:13, fontWeight:600, color:'#334155' }}>E-mail</label>
@@ -527,7 +464,6 @@ function App() {
             {authError && <div style={{ background:'#fee2e2', color:'#991b1b', padding:'12px 14px', borderRadius:10, fontSize:13, marginBottom:16 }}>⚠️ {authError}</div>}
             <button type="submit" disabled={!firebaseReady} style={{ width:'100%', padding:'12px 16px', background:firebaseReady ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : '#ccc', color:'white', border:'none', borderRadius:10, fontSize:14, fontWeight:700, cursor:firebaseReady ? 'pointer' : 'not-allowed' }}>{isSignup ? 'Criar conta' : 'Entrar'}</button>
           </form>
-
           <div style={{ padding:'16px', background:'#f0f4ff', borderRadius:10, fontSize:12, color:'#475569', border:'1px solid #e0e7ff' }}>
             <strong style={{ color:'#334155' }}>💡 Dica:</strong><br/>Seus dados sincronizam entre PC e celular após o login.
           </div>
@@ -546,6 +482,7 @@ function App() {
           <div className="nav">
             <button className={navView === 'calendar' ? 'active' : ''} onClick={() => setNavView('calendar')} title="Calendário"><Icon name="calendar" /></button>
             <button className={navView === 'categories' ? 'active' : ''} onClick={() => setNavView('categories')} title="Tipos"><Icon name="tag" /></button>
+            <button className={navView === 'subjects' ? 'active' : ''} onClick={() => setNavView('subjects')} title="Matérias"><Icon name="book" /></button>
             <button className={navView === 'settings' ? 'active' : ''} onClick={() => setNavView('settings')} title="Configurações"><Icon name="settings" /></button>
           </div>
           <div className="footer">
@@ -589,7 +526,6 @@ function App() {
                     </div>
                   )}
                 </div>
-
                 <div className="cal-controls">
                   <div className="view-tabs">
                     {VIEWS.map(v => (
@@ -645,13 +581,14 @@ function App() {
             <div style={{ display: 'block', width: '100%' }}>
               {navView === 'settings' && <SettingsScreen tweaks={tweaks} setTweak={setTweak} />}
               {navView === 'categories' && <CategoriesScreen categories={categories} setCategories={setCategories} events={events} />}
+              {navView === 'subjects' && <SubjectsManagerScreen subjects={subjects} setSubjects={setSubjects} events={events} />}
             </div>
           )}
         </main>
       </div>
 
       {modalOpen && (
-        <EventModal event={editing?.event} defaultDate={editing?.defaultDate} onClose={() => setModalOpen(false)} onSave={saveEvent} onDelete={deleteEvent} />
+        <EventModal event={editing?.event} defaultDate={editing?.defaultDate} subjects={subjects} onClose={() => setModalOpen(false)} onSave={saveEvent} onDelete={deleteEvent} />
       )}
 
       <TweaksPanel title="Tweaks · Ferstudy">
