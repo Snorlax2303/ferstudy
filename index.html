@@ -10,27 +10,45 @@
 <body data-theme="blue" data-density="comfy">
 <div id="root"></div>
 
-<!-- React (SEM type="text/babel") -->
-<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<!-- ============================================ -->
+<!-- ORDEM CRÍTICA - NÃO MUDE! -->
+<!-- ============================================ -->
 
-<!-- ⚠️ IMPORTANTE: Firebase DEVE estar ANTES de firebase-config.js ⚠️ -->
-<!-- NÃO use type="text/babel" nos scripts Firebase! -->
+<!-- 1. React (SEM type="text/babel") -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
+
+<!-- 2. Babel (DEPOIS de React) -->
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"></script>
+
+<!-- 3. Firebase CDN (SEM type="text/babel" - NÃO MEXA!) -->
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js"></script>
 
-<!-- Firebase Config (DEPOIS do Firebase CDN, SEM type="text/babel") -->
+<!-- 4. Firebase Config (SEM type="text/babel" - NÃO MEXA!) -->
 <script src="ferstudy/firebase-config.js"></script>
 
-<!-- Arquivos do app (COM type="text/babel" porque usam JSX) -->
-<script type="text/babel" src="ferstudy/data.jsx"></script>
+<!-- 5. Dados e constantes (SEM type="text/babel" - é JS puro) -->
+<script src="ferstudy/data.jsx"></script>
+
+<!-- 6. Icons (COM type="text/babel" - usa JSX) -->
 <script type="text/babel" src="ferstudy/icons.jsx"></script>
+
+<!-- 7. Tweaks Panel (COM type="text/babel" - usa JSX) -->
 <script type="text/babel" src="ferstudy/tweaks-panel.jsx"></script>
+
+<!-- 8. Modal (COM type="text/babel" - usa JSX) -->
 <script type="text/babel" src="ferstudy/modal.jsx"></script>
+
+<!-- 9. Views (COM type="text/babel" - usa JSX) -->
 <script type="text/babel" src="ferstudy/views.jsx"></script>
+
+<!-- 10. Screens (COM type="text/babel" - usa JSX) -->
 <script type="text/babel" src="ferstudy/screens.jsx"></script>
+
+<!-- 11. App (COM type="text/babel" - usa JSX) -->
 <script type="text/babel" src="ferstudy/app.jsx"></script>
+
 </body>
 </html>
