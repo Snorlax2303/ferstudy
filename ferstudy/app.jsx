@@ -1,6 +1,6 @@
-// ferstudy/app.jsx — app otimizado para VERCEL
+// ferstudy/app.jsx — app com sincronização total via Firestore
 
-const { useState: uS, useMemo, useEffect: uE } = React;
+const { useState: uS, useMemo, useEffect: uE, useRef: uR } = React;
 
 const VIEWS = [
   { id: 'month', label: 'Mês' },
@@ -16,7 +16,7 @@ function App() {
   };
 
   const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
-  
+
   // Estado de autenticação
   const [user, setUser] = uS(null);
   const [loading, setLoading] = uS(true);
@@ -26,17 +26,20 @@ function App() {
   const [authError, setAuthError] = uS('');
   const [firebaseReady, setFirebaseReady] = uS(false);
 
-  // Aguardar Firebase estar pronto - OTIMIZADO PARA VERCEL
+  // 🔒 Flags de sincronização (evita loops cloud→local→cloud)
+  const isSyncingEvents = uR(false);
+  const isSyncingCategories = uR(false);
+  const isSyncingNotes = uR(false);
+  const initialSyncDone = uR({ events: false, categories: false });
+
+  // Aguardar Firebase estar pronto
   uE(() => {
     console.log("🔍 [APP] Esperando Firebase estar pronto...");
-    
     let mounted = true;
-    let timeout;
 
     const waitForFirebase = async () => {
-      // Aguardar até 15 segundos
       let attempts = 0;
-      const maxAttempts = 150; // 15 segundos (150 * 100ms)
+      const maxAttempts = 150;
 
       while (attempts < maxAttempts && mounted) {
         if (window.firebaseReady && window.auth && window.db) {
@@ -50,147 +53,91 @@ function App() {
       }
 
       if (mounted) {
-        console.warn("⚠️ [APP] Firebase não ficou pronto em 15 segundos, continuando mesmo assim...");
+        console.warn("⚠️ [APP] Firebase não ficou pronto em 15s, continuando...");
         setFirebaseReady(window.firebaseReady || false);
         setLoading(false);
       }
     };
 
     waitForFirebase();
-
-    return () => {
-      mounted = false;
-      if (timeout) clearTimeout(timeout);
-    };
+    return () => { mounted = false; };
   }, []);
 
-  // Escutar mudanças de autenticação - APÓS Firebase estar pronto
+  // Listener de autenticação
   uE(() => {
-    if (!firebaseReady || !window.auth) {
-      console.warn("⚠️ [APP] Firebase não está pronto ou auth não existe");
-      return;
-    }
-
+    if (!firebaseReady || !window.auth) return;
     console.log("👤 [APP] Configurando listener de autenticação...");
 
     let unsubscribe;
     try {
       unsubscribe = window.auth.onAuthStateChanged(
         (currentUser) => {
-          console.log("👤 [APP] Estado de autenticação:", currentUser ? currentUser.email : "não autenticado");
+          console.log("👤 [APP] Auth state:", currentUser ? currentUser.email : "deslogado");
+          // Reset das flags ao trocar de usuário
+          initialSyncDone.current = { events: false, categories: false };
           setUser(currentUser);
         },
-        (error) => {
-          console.error("❌ [APP] Erro ao escutar autenticação:", error);
-        }
+        (error) => console.error("❌ [APP] Erro auth:", error)
       );
     } catch (error) {
-      console.error("❌ [APP] Erro ao configurar listener:", error);
+      console.error("❌ [APP] Erro listener:", error);
     }
 
-    return () => {
-      if (unsubscribe) {
-        console.log("🧹 [APP] Removendo listener de autenticação");
-        unsubscribe();
-      }
-    };
+    return () => { if (unsubscribe) unsubscribe(); };
   }, [firebaseReady]);
 
-  // Funções de autenticação
+  // ============ AUTH HANDLERS ============
   const handleSignup = async (e) => {
     e.preventDefault();
     setAuthError('');
-    
-    if (!window.auth) {
-      setAuthError('❌ Firebase não inicializado. Tente recarregar.');
-      console.error("❌ window.auth não disponível");
-      return;
-    }
-
-    if (!email || !password) {
-      setAuthError('Preencha e-mail e senha');
-      return;
-    }
-
-    if (password.length < 6) {
-      setAuthError('Senha deve ter no mínimo 6 caracteres');
-      return;
-    }
+    if (!window.auth) { setAuthError('❌ Firebase não inicializado.'); return; }
+    if (!email || !password) { setAuthError('Preencha e-mail e senha'); return; }
+    if (password.length < 6) { setAuthError('Senha mín. 6 caracteres'); return; }
 
     try {
-      console.log("📝 [AUTH] Tentando registrar:", email);
       const userCredential = await window.auth.createUserWithEmailAndPassword(email, password);
-      console.log("✅ [AUTH] Usuário criado:", userCredential.user.uid);
-      setEmail('');
-      setPassword('');
-      setIsSignup(false);
-      setAuthError('');
+      console.log("✅ [AUTH] Criado:", userCredential.user.uid);
+      setEmail(''); setPassword(''); setIsSignup(false); setAuthError('');
     } catch (error) {
-      console.error('❌ [AUTH] Erro signup:', error.code, error.message);
-      
       const errorMap = {
         'auth/email-already-in-use': 'Este e-mail já está registrado',
         'auth/invalid-email': 'E-mail inválido',
-        'auth/weak-password': 'Senha muito fraca (mín. 6 caracteres)',
-        'auth/operation-not-allowed': 'Registros desativados. Ative no Firebase Console.',
-        'auth/network-request-failed': 'Erro de conexão. Verifique sua internet.',
+        'auth/weak-password': 'Senha muito fraca',
+        'auth/operation-not-allowed': 'Registros desativados no Firebase Console.',
+        'auth/network-request-failed': 'Erro de conexão',
       };
-      
-      const mensagem = errorMap[error.code] || `Erro: ${error.message}`;
-      setAuthError(mensagem);
+      setAuthError(errorMap[error.code] || `Erro: ${error.message}`);
     }
   };
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setAuthError('');
-    
-    if (!window.auth) {
-      setAuthError('❌ Firebase não inicializado. Tente recarregar.');
-      console.error("❌ window.auth não disponível");
-      return;
-    }
-
-    if (!email || !password) {
-      setAuthError('Preencha e-mail e senha');
-      return;
-    }
+    if (!window.auth) { setAuthError('❌ Firebase não inicializado.'); return; }
+    if (!email || !password) { setAuthError('Preencha e-mail e senha'); return; }
 
     try {
-      console.log("🔐 [AUTH] Tentando login:", email);
-      const userCredential = await window.auth.signInWithEmailAndPassword(email, password);
-      console.log("✅ [AUTH] Login bem-sucedido:", userCredential.user.uid);
-      setEmail('');
-      setPassword('');
-      setAuthError('');
+      await window.auth.signInWithEmailAndPassword(email, password);
+      setEmail(''); setPassword(''); setAuthError('');
     } catch (error) {
-      console.error('❌ [AUTH] Erro login:', error.code, error.message);
-      
       const errorMap = {
         'auth/user-not-found': 'Usuário não encontrado',
         'auth/wrong-password': 'Senha incorreta',
         'auth/invalid-email': 'E-mail inválido',
         'auth/user-disabled': 'Usuário desativado',
-        'auth/network-request-failed': 'Erro de conexão. Verifique sua internet.',
-        'auth/too-many-requests': 'Muitas tentativas. Tente novamente mais tarde.',
+        'auth/network-request-failed': 'Erro de conexão',
+        'auth/too-many-requests': 'Muitas tentativas. Aguarde.',
+        'auth/invalid-credential': 'E-mail ou senha incorretos',
       };
-      
-      const mensagem = errorMap[error.code] || `Erro: ${error.message}`;
-      setAuthError(mensagem);
+      setAuthError(errorMap[error.code] || `Erro: ${error.message}`);
     }
   };
 
   const handleLogout = async () => {
     try {
-      if (window.auth) {
-        await window.auth.signOut();
-      }
-      setEmail('');
-      setPassword('');
-      setAuthError('');
-    } catch (error) {
-      console.error('❌ [AUTH] Erro logout:', error);
-    }
+      if (window.auth) await window.auth.signOut();
+      setEmail(''); setPassword(''); setAuthError('');
+    } catch (error) { console.error('❌ Logout:', error); }
   };
 
   // Apply tweaks
@@ -203,34 +150,73 @@ function App() {
   const [cursor, setCursor] = uS(new Date(today.getFullYear(), today.getMonth(), 1));
   const [selected, setSelected] = uS(today);
   const [view, setView] = uS('month');
-  
+
+  // ============ EVENTOS ============
   const [events, setEvents] = uS(() => {
     try {
       const saved = localStorage.getItem('ferstudy.events');
       return saved ? JSON.parse(saved) : SEED_EVENTS;
-    } catch (_) {
-      return SEED_EVENTS;
-    }
+    } catch (_) { return SEED_EVENTS; }
   });
 
+  // 🔄 SYNC EVENTOS: escuta nuvem → atualiza local
+  uE(() => {
+    if (!user || !window.db) return;
+    console.log("🔄 [SYNC events] Iniciando listener para", user.email);
+
+    const unsubscribe = window.db
+      .collection('users').doc(user.uid).collection('events')
+      .onSnapshot(
+        (snapshot) => {
+          const cloudEvents = snapshot.docs.map(doc => doc.data());
+          console.log(`☁️ [SYNC events] ${cloudEvents.length} recebidos da nuvem`);
+
+          // Primeira sincronização: se nuvem vazia, faz upload do local; senão usa nuvem
+          if (!initialSyncDone.current.events) {
+            initialSyncDone.current.events = true;
+            if (cloudEvents.length === 0) {
+              console.log("⬆️ [SYNC events] Nuvem vazia, mantendo locais para upload");
+              return; // mantém events locais; o useEffect de salvamento vai mandar pra nuvem
+            }
+          }
+
+          isSyncingEvents.current = true;
+          setEvents(cloudEvents);
+          // Libera a flag depois do próximo ciclo de render
+          setTimeout(() => { isSyncingEvents.current = false; }, 100);
+        },
+        (error) => console.error('❌ [SYNC events]', error)
+      );
+
+    return () => {
+      console.log("🧹 [SYNC events] Removendo listener");
+      unsubscribe();
+    };
+  }, [user]);
+
+  // 💾 Salvar eventos: localStorage sempre + Firestore se logado
   uE(() => {
     try {
       localStorage.setItem('ferstudy.events', JSON.stringify(events));
-      
+
+      // Pula salvamento se acabamos de receber da nuvem (evita loop)
+      if (isSyncingEvents.current) {
+        console.log("⏭️ [SYNC events] Pulando save (acabou de chegar da nuvem)");
+        return;
+      }
+
       if (user && window.db) {
+        const batch = window.db.batch();
+        const eventsCol = window.db.collection('users').doc(user.uid).collection('events');
         events.forEach((event) => {
-          window.db
-            .collection('users')
-            .doc(user.uid)
-            .collection('events')
-            .doc(String(event.id))
-            .set(event)
-            .catch((error) => console.error('❌ Erro salvar:', error));
+          batch.set(eventsCol.doc(String(event.id)), event);
         });
+        batch.commit().catch((error) => console.error('❌ Save events:', error));
       }
     } catch (_) {}
   }, [events, user]);
 
+  // ============ CATEGORIAS ============
   const [categories, setCategories] = uS(() => {
     try {
       const saved = localStorage.getItem('ferstudy.categories');
@@ -238,12 +224,55 @@ function App() {
     } catch (_) {}
     return Object.values(CATEGORIES).map(c => ({ id: c.id, label: c.label, color: c.color }));
   });
-  
-  uE(() => { 
-    try { 
-      localStorage.setItem('ferstudy.categories', JSON.stringify(categories)); 
-    } catch(_){}
-  }, [categories]);
+
+  // 🔄 SYNC CATEGORIAS: escuta doc único na nuvem
+  uE(() => {
+    if (!user || !window.db) return;
+    console.log("🔄 [SYNC categories] Iniciando listener");
+
+    const unsubscribe = window.db
+      .collection('users').doc(user.uid).collection('settings').doc('categories')
+      .onSnapshot(
+        (doc) => {
+          if (!doc.exists) {
+            console.log("📝 [SYNC categories] Doc não existe ainda, mantendo locais");
+            initialSyncDone.current.categories = true;
+            return; // useEffect de save vai criar
+          }
+          const data = doc.data();
+          if (data && Array.isArray(data.items)) {
+            console.log(`☁️ [SYNC categories] ${data.items.length} recebidas`);
+            isSyncingCategories.current = true;
+            setCategories(data.items);
+            setTimeout(() => { isSyncingCategories.current = false; }, 100);
+          }
+          initialSyncDone.current.categories = true;
+        },
+        (error) => console.error('❌ [SYNC categories]', error)
+      );
+
+    return () => {
+      console.log("🧹 [SYNC categories] Removendo listener");
+      unsubscribe();
+    };
+  }, [user]);
+
+  // 💾 Salvar categorias
+  uE(() => {
+    try {
+      localStorage.setItem('ferstudy.categories', JSON.stringify(categories));
+
+      if (isSyncingCategories.current) return;
+
+      if (user && window.db) {
+        window.db
+          .collection('users').doc(user.uid)
+          .collection('settings').doc('categories')
+          .set({ items: categories, updatedAt: Date.now() })
+          .catch((error) => console.error('❌ Save categories:', error));
+      }
+    } catch (_) {}
+  }, [categories, user]);
 
   const catMap = useMemo(() => {
     const m = {};
@@ -258,6 +287,98 @@ function App() {
 
   uE(() => { window.CATEGORIES = catMap; }, [catMap]);
 
+  // ============ NOTAS ============
+  // Notas são guardadas por data (notes_YYYY-MM-DD no localStorage; doc por data no Firestore)
+  // Como o modal lê/escreve direto no localStorage por data, expomos sync via window.notesSync
+  uE(() => {
+    if (!user || !window.db) {
+      window.notesSync = null;
+      return;
+    }
+
+    console.log("🔄 [SYNC notes] Configurando sync de notas");
+
+    // Listener: escuta TODAS as notas do usuário e replica no localStorage
+    const unsubscribe = window.db
+      .collection('users').doc(user.uid).collection('notes')
+      .onSnapshot(
+        (snapshot) => {
+          console.log(`☁️ [SYNC notes] ${snapshot.docs.length} dias com notas recebidos`);
+          isSyncingNotes.current = true;
+
+          // Pega as datas que têm notas locais para detectar deleções
+          const localNoteKeys = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith('notes_')) localNoteKeys.push(k);
+          }
+          const cloudKeys = new Set(snapshot.docs.map(d => `notes_${d.id}`));
+
+          // Atualiza/cria notas que estão na nuvem
+          snapshot.docs.forEach(doc => {
+            const data = doc.data();
+            if (data && Array.isArray(data.items)) {
+              const key = `notes_${doc.id}`;
+              if (data.items.length > 0) {
+                localStorage.setItem(key, JSON.stringify(data.items));
+              } else {
+                localStorage.removeItem(key);
+              }
+            }
+          });
+
+          // Remove notas locais que foram deletadas da nuvem
+          // (só na primeira sincronização, pra não apagar notas que ainda não subiram)
+          // Aqui assumimos: se a nuvem não tem aquela data, e o snapshot está confirmado,
+          // a nota foi deletada propositalmente em outro device
+          localNoteKeys.forEach(k => {
+            if (!cloudKeys.has(k)) {
+              // Antes de remover, vamos manter — o save abaixo vai subir pra nuvem
+              // Comportamento conservador: só remove se já tivemos sync inicial
+            }
+          });
+
+          // Notifica componentes (modal) que algo mudou
+          window.dispatchEvent(new CustomEvent('notes-updated'));
+
+          setTimeout(() => { isSyncingNotes.current = false; }, 100);
+        },
+        (error) => console.error('❌ [SYNC notes]', error)
+      );
+
+    // Função para o modal salvar uma nota (será chamada de fora)
+    window.notesSync = {
+      saveNote: async (dateKey, items) => {
+        if (isSyncingNotes.current) return;
+        if (!user || !window.db) return;
+        try {
+          if (items && items.length > 0) {
+            await window.db
+              .collection('users').doc(user.uid)
+              .collection('notes').doc(dateKey)
+              .set({ items, updatedAt: Date.now() });
+            console.log(`💾 [SYNC notes] Salvou ${items.length} notas em ${dateKey}`);
+          } else {
+            await window.db
+              .collection('users').doc(user.uid)
+              .collection('notes').doc(dateKey)
+              .delete();
+            console.log(`🗑️ [SYNC notes] Removeu notas de ${dateKey}`);
+          }
+        } catch (error) {
+          console.error('❌ Save note:', error);
+        }
+      }
+    };
+
+    return () => {
+      console.log("🧹 [SYNC notes] Removendo listener");
+      window.notesSync = null;
+      unsubscribe();
+    };
+  }, [user]);
+
+  // ============ DEMAIS ESTADOS ============
   const [search, setSearch] = uS('');
 
   const eventsByDay = useMemo(() => {
@@ -275,9 +396,7 @@ function App() {
 
   const grid = useMemo(() => buildMonthGrid(cursor.getFullYear(), cursor.getMonth()), [cursor]);
 
-  const navMonth = (delta) => {
-    setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + delta, 1));
-  };
+  const navMonth = (delta) => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + delta, 1));
   const navTimeline = (delta) => {
     if (view === 'week') setSelected(addDays(selected, delta * 7));
     else if (view === 'day') setSelected(addDays(selected, delta));
@@ -290,10 +409,7 @@ function App() {
   const [showMonths, setShowMonths] = uS(false);
   const [agendaCollapsed, setAgendaCollapsed] = uS(false);
 
-  const openCreate = (date) => {
-    setEditing({ defaultDate: date ? ymd(date) : ymd(selected) });
-    setModalOpen(true);
-  };
+  const openCreate = (date) => { setEditing({ defaultDate: date ? ymd(date) : ymd(selected) }); setModalOpen(true); };
   const openEdit = (ev) => { setEditing({ event: ev }); setModalOpen(true); };
 
   const saveEvent = (data) => {
@@ -305,21 +421,17 @@ function App() {
     }
     setModalOpen(false);
   };
-  
+
   const deleteEvent = (id) => {
     setEvents(prev => prev.filter(e => e.id !== id));
     if (user && window.db) {
       window.db
-        .collection('users')
-        .doc(user.uid)
-        .collection('events')
-        .doc(String(id))
-        .delete()
-        .catch((error) => console.error('❌ Erro deletar:', error));
+        .collection('users').doc(user.uid).collection('events').doc(String(id))
+        .delete().catch((error) => console.error('❌ Delete event:', error));
     }
     setModalOpen(false);
   };
-  
+
   const moveEvent = (id, newDateKey) => {
     setEvents(prev => prev.map(e => e.id === id ? { ...e, date: newDateKey } : e));
   };
@@ -358,31 +470,17 @@ function App() {
     return upcoming[0];
   }, [events]);
 
-  // TELA DE LOADING
+  // ============ TELA DE LOADING ============
   if (loading) {
     return (
       <>
         <div className="app-bg" />
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          height: '100vh',
-          background: 'var(--bg)',
-        }}>
-          <div style={{ textAlign: 'center', color: 'var(--text-1)' }}>
+        <div style={{ display:'flex', justifyContent:'center', alignItems:'center', height:'100vh', background:'var(--bg)' }}>
+          <div style={{ textAlign:'center', color:'var(--text-1)' }}>
             <div style={{ fontSize: 56, marginBottom: 20 }}>📚</div>
-            <h1 style={{ margin: '0 0 12px 0', fontSize: 28, fontWeight: 700 }}>Ferstudy</h1>
-            <p style={{ margin: '0 0 24px 0', color: 'var(--text-2)', fontSize: 14 }}>Preparando tudo...</p>
-            <div style={{
-              width: 40,
-              height: 40,
-              border: '3px solid var(--surface-hi)',
-              borderTop: '3px solid var(--primary)',
-              borderRadius: '50%',
-              margin: '0 auto',
-              animation: 'spin 0.8s linear infinite',
-            }}>
+            <h1 style={{ margin:'0 0 12px 0', fontSize:28, fontWeight:700 }}>Ferstudy</h1>
+            <p style={{ margin:'0 0 24px 0', color:'var(--text-2)', fontSize:14 }}>Preparando tudo...</p>
+            <div style={{ width:40, height:40, border:'3px solid var(--surface-hi)', borderTop:'3px solid var(--primary)', borderRadius:'50%', margin:'0 auto', animation:'spin 0.8s linear infinite' }}>
               <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
             </div>
           </div>
@@ -391,89 +489,54 @@ function App() {
     );
   }
 
-  // TELA DE LOGIN
+  // ============ TELA DE LOGIN ============
   if (!user) {
     return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        padding: '20px',
-      }}>
-        <div style={{
-          background: 'white',
-          borderRadius: 20,
-          padding: '40px 32px',
-          width: '100%',
-          maxWidth: 420,
-          boxShadow: '0 25px 50px rgba(0, 0, 0, 0.2)',
-        }}>
-          <div style={{ textAlign: 'center', marginBottom: 32 }}>
-            <div style={{ fontSize: 56, marginBottom: 16 }}>📚</div>
-            <h1 style={{ margin: '0 0 8px 0', fontSize: 32, color: '#1e293b', fontWeight: 800 }}>Ferstudy</h1>
-            <p style={{ margin: 0, color: '#64748b', fontSize: 14 }}>Calendário de estudos</p>
+      <div style={{ display:'flex', justifyContent:'center', alignItems:'center', minHeight:'100vh', background:'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', padding:'20px' }}>
+        <div style={{ background:'white', borderRadius:20, padding:'40px 32px', width:'100%', maxWidth:420, boxShadow:'0 25px 50px rgba(0, 0, 0, 0.2)' }}>
+          <div style={{ textAlign:'center', marginBottom:32 }}>
+            <div style={{ fontSize:56, marginBottom:16 }}>📚</div>
+            <h1 style={{ margin:'0 0 8px 0', fontSize:32, color:'#1e293b', fontWeight:800 }}>Ferstudy</h1>
+            <p style={{ margin:0, color:'#64748b', fontSize:14 }}>Calendário de estudos</p>
           </div>
 
           {!firebaseReady && (
-            <div style={{ background: '#fef3c7', color: '#92400e', padding: '12px 14px', borderRadius: 10, fontSize: 13, marginBottom: 16, border: '1px solid #fcd34d' }}>
+            <div style={{ background:'#fef3c7', color:'#92400e', padding:'12px 14px', borderRadius:10, fontSize:13, marginBottom:16, border:'1px solid #fcd34d' }}>
               ⏳ Inicializando Firebase...
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-            <button onClick={() => { setIsSignup(false); setAuthError(''); }} style={{
-              flex: 1, padding: '10px', border: 'none',
-              background: !isSignup ? '#667eea' : '#f1f5f9',
-              color: !isSignup ? 'white' : '#64748b',
-              borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer',
-            }}>Entrar</button>
-            <button onClick={() => { setIsSignup(true); setAuthError(''); }} style={{
-              flex: 1, padding: '10px', border: 'none',
-              background: isSignup ? '#667eea' : '#f1f5f9',
-              color: isSignup ? 'white' : '#64748b',
-              borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer',
-            }}>Registrar</button>
+          <div style={{ display:'flex', gap:8, marginBottom:24 }}>
+            <button onClick={() => { setIsSignup(false); setAuthError(''); }} style={{ flex:1, padding:'10px', border:'none', background:!isSignup ? '#667eea' : '#f1f5f9', color:!isSignup ? 'white' : '#64748b', borderRadius:8, fontSize:14, fontWeight:600, cursor:'pointer' }}>Entrar</button>
+            <button onClick={() => { setIsSignup(true); setAuthError(''); }} style={{ flex:1, padding:'10px', border:'none', background:isSignup ? '#667eea' : '#f1f5f9', color:isSignup ? 'white' : '#64748b', borderRadius:8, fontSize:14, fontWeight:600, cursor:'pointer' }}>Registrar</button>
           </div>
 
-          <form onSubmit={isSignup ? handleSignup : handleLogin} style={{ marginBottom: 20 }}>
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', marginBottom: 8, fontSize: 13, fontWeight: 600, color: '#334155' }}>E-mail</label>
+          <form onSubmit={isSignup ? handleSignup : handleLogin} style={{ marginBottom:20 }}>
+            <div style={{ marginBottom:16 }}>
+              <label style={{ display:'block', marginBottom:8, fontSize:13, fontWeight:600, color:'#334155' }}>E-mail</label>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seu@email.com"
-                style={{ width: '100%', padding: '12px 14px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 14, color: '#1e293b', background: '#ffffff' }}
-                disabled={!firebaseReady}
-                onFocus={(e) => e.target.style.borderColor = '#667eea'}
-                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'} />
+                style={{ width:'100%', padding:'12px 14px', border:'1.5px solid #e2e8f0', borderRadius:10, fontSize:14, color:'#1e293b', background:'#ffffff' }}
+                disabled={!firebaseReady} />
             </div>
-
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'block', marginBottom: 8, fontSize: 13, fontWeight: 600, color: '#334155' }}>Senha</label>
+            <div style={{ marginBottom:20 }}>
+              <label style={{ display:'block', marginBottom:8, fontSize:13, fontWeight:600, color:'#334155' }}>Senha</label>
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres"
-                style={{ width: '100%', padding: '12px 14px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 14, color: '#1e293b', background: '#ffffff' }}
-                disabled={!firebaseReady}
-                onFocus={(e) => e.target.style.borderColor = '#667eea'}
-                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'} />
+                style={{ width:'100%', padding:'12px 14px', border:'1.5px solid #e2e8f0', borderRadius:10, fontSize:14, color:'#1e293b', background:'#ffffff' }}
+                disabled={!firebaseReady} />
             </div>
-
-            {authError && <div style={{ background: '#fee2e2', color: '#991b1b', padding: '12px 14px', borderRadius: 10, fontSize: 13, marginBottom: 16 }}>⚠️ {authError}</div>}
-
-            <button type="submit" disabled={!firebaseReady} style={{
-              width: '100%', padding: '12px 16px',
-              background: firebaseReady ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : '#ccc',
-              color: 'white', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: firebaseReady ? 'pointer' : 'not-allowed',
-            }}>{isSignup ? 'Criar conta' : 'Entrar'}</button>
+            {authError && <div style={{ background:'#fee2e2', color:'#991b1b', padding:'12px 14px', borderRadius:10, fontSize:13, marginBottom:16 }}>⚠️ {authError}</div>}
+            <button type="submit" disabled={!firebaseReady} style={{ width:'100%', padding:'12px 16px', background:firebaseReady ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : '#ccc', color:'white', border:'none', borderRadius:10, fontSize:14, fontWeight:700, cursor:firebaseReady ? 'pointer' : 'not-allowed' }}>{isSignup ? 'Criar conta' : 'Entrar'}</button>
           </form>
 
-          <div style={{ padding: '16px', background: '#f0f4ff', borderRadius: 10, fontSize: 12, color: '#475569', border: '1px solid #e0e7ff' }}>
-            <strong style={{ color: '#334155' }}>💡 Dica:</strong><br/>Use qualquer e-mail e senha com 6+ caracteres para registrar!
+          <div style={{ padding:'16px', background:'#f0f4ff', borderRadius:10, fontSize:12, color:'#475569', border:'1px solid #e0e7ff' }}>
+            <strong style={{ color:'#334155' }}>💡 Dica:</strong><br/>Seus dados sincronizam entre PC e celular após o login.
           </div>
         </div>
       </div>
     );
   }
 
-  // APP PRINCIPAL
+  // ============ APP PRINCIPAL ============
   return (
     <>
       <div className="app-bg" />
@@ -486,7 +549,7 @@ function App() {
             <button className={navView === 'settings' ? 'active' : ''} onClick={() => setNavView('settings')} title="Configurações"><Icon name="settings" /></button>
           </div>
           <div className="footer">
-            <button onClick={handleLogout} title="Sair" style={{background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', fontSize: 16}}>🚪</button>
+            <button onClick={handleLogout} title="Sair" style={{ background:'none', border:'none', color:'var(--text-2)', cursor:'pointer', fontSize:16 }}>🚪</button>
           </div>
         </aside>
 
