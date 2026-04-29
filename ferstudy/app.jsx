@@ -1,4 +1,4 @@
-// ferstudy/app.jsx — app com sincronização total via Firestore + matérias dinâmicas
+// ferstudy/app.jsx — VERSÃO CORRIGIDA COM SYNC PERSISTENTE
 
 const { useState: uS, useMemo, useEffect: uE, useRef: uR } = React;
 
@@ -26,12 +26,18 @@ function App() {
   const [authError, setAuthError] = uS('');
   const [firebaseReady, setFirebaseReady] = uS(false);
 
-  // Flags de sync
+  // Flags de sync — CORREÇÃO: Rastrear se já sincronizou COM FIRESTORE
   const isSyncingEvents = uR(false);
   const isSyncingCategories = uR(false);
   const isSyncingSubjects = uR(false);
   const isSyncingNotes = uR(false);
-  const initialSyncDone = uR({ events: false, categories: false, subjects: false });
+  
+  // ✅ NOVO: Flag de "primeira sincronização com nuvem" por tipo
+  const hasReceivedCloudData = uR({ 
+    events: false,      // true = já recebeu dados da nuvem
+    categories: false,
+    subjects: false 
+  });
 
   // Aguardar Firebase
   uE(() => {
@@ -63,7 +69,8 @@ function App() {
     let unsubscribe;
     try {
       unsubscribe = window.auth.onAuthStateChanged((currentUser) => {
-        initialSyncDone.current = { events: false, categories: false, subjects: false };
+        // ✅ CORREÇÃO: Resetar flags quando usuário muda
+        hasReceivedCloudData.current = { events: false, categories: false, subjects: false };
         setUser(currentUser);
       });
     } catch (error) { console.error("❌ Listener:", error); }
@@ -136,39 +143,60 @@ function App() {
   const [events, setEvents] = uS(() => {
     try {
       const saved = localStorage.getItem('ferstudy.events');
-      return saved ? JSON.parse(saved) : SEED_EVENTS;
-    } catch (_) { return SEED_EVENTS; }
+      return saved ? JSON.parse(saved) : [];
+    } catch (_) { return []; }
   });
 
   uE(() => {
     if (!user || !window.db) return;
+    
+    console.log("🔄 [SYNC events] Iniciando listener");
+    
     const unsubscribe = window.db
       .collection('users').doc(user.uid).collection('events')
       .onSnapshot(
         (snapshot) => {
           const cloudEvents = snapshot.docs.map(doc => doc.data());
-          if (!initialSyncDone.current.events) {
-            initialSyncDone.current.events = true;
-            if (cloudEvents.length === 0) return;
+          
+          // ✅ CORREÇÃO: Registra que recebeu dados da nuvem
+          hasReceivedCloudData.current.events = true;
+          
+          // Se a nuvem tem dados, usa os dados da nuvem
+          if (cloudEvents.length > 0) {
+            console.log(`☁️ [SYNC events] ${cloudEvents.length} eventos recebidos da nuvem`);
+            isSyncingEvents.current = true;
+            setEvents(cloudEvents);
+            setTimeout(() => { isSyncingEvents.current = false; }, 100);
+          } else {
+            // Se a nuvem está vazia, mantém o que está em localStorage
+            console.log("📝 [SYNC events] Nuvem vazia, mantendo dados locais");
           }
-          isSyncingEvents.current = true;
-          setEvents(cloudEvents);
-          setTimeout(() => { isSyncingEvents.current = false; }, 100);
         },
         (error) => console.error('❌ [SYNC events]', error)
       );
+    
     return () => unsubscribe();
   }, [user]);
 
   uE(() => {
     try {
       localStorage.setItem('ferstudy.events', JSON.stringify(events));
+      
+      // ✅ CORREÇÃO: Só sincroniza se foi feita uma alteração LOCAL
+      // (não sincroniza automaticamente dados padrão)
       if (isSyncingEvents.current) return;
-      if (user && window.db) {
+      if (user && window.db && hasReceivedCloudData.current.events) {
         const batch = window.db.batch();
         const eventsCol = window.db.collection('users').doc(user.uid).collection('events');
-        events.forEach((event) => batch.set(eventsCol.doc(String(event.id)), event));
-        batch.commit().catch((error) => console.error('❌ Save events:', error));
+        
+        // Limpa dados antigos e sincroniza os novos
+        events.forEach((event) => {
+          batch.set(eventsCol.doc(String(event.id)), event);
+        });
+        
+        batch.commit()
+          .then(() => console.log("✅ [SYNC events] Sincronizados para nuvem"))
+          .catch((error) => console.error('❌ Save events:', error));
       }
     } catch (_) {}
   }, [events, user]);
@@ -184,32 +212,48 @@ function App() {
 
   uE(() => {
     if (!user || !window.db) return;
+    
+    console.log("🔄 [SYNC categories] Iniciando listener");
+    
     const unsubscribe = window.db
       .collection('users').doc(user.uid).collection('settings').doc('categories')
       .onSnapshot(
         (doc) => {
-          if (!doc.exists) { initialSyncDone.current.categories = true; return; }
+          // ✅ CORREÇÃO: Marca que recebeu dados da nuvem
+          hasReceivedCloudData.current.categories = true;
+          
+          if (!doc.exists) {
+            console.log("📝 [SYNC categories] Doc não existe na nuvem");
+            return;
+          }
+          
           const data = doc.data();
-          if (data && Array.isArray(data.items)) {
+          if (data && Array.isArray(data.items) && data.items.length > 0) {
+            console.log(`☁️ [SYNC categories] ${data.items.length} categorias recebidas`);
             isSyncingCategories.current = true;
             setCategories(data.items);
             setTimeout(() => { isSyncingCategories.current = false; }, 100);
+          } else {
+            console.log("📝 [SYNC categories] Nuvem vazia, mantendo dados locais");
           }
-          initialSyncDone.current.categories = true;
         },
         (error) => console.error('❌ [SYNC categories]', error)
       );
+    
     return () => unsubscribe();
   }, [user]);
 
   uE(() => {
     try {
       localStorage.setItem('ferstudy.categories', JSON.stringify(categories));
+      
+      // ✅ CORREÇÃO: Só sincroniza se foi alteração LOCAL
       if (isSyncingCategories.current) return;
-      if (user && window.db) {
+      if (user && window.db && hasReceivedCloudData.current.categories) {
         window.db.collection('users').doc(user.uid)
           .collection('settings').doc('categories')
           .set({ items: categories, updatedAt: Date.now() })
+          .then(() => console.log("✅ [SYNC categories] Sincronizadas para nuvem"))
           .catch((error) => console.error('❌ Save categories:', error));
       }
     } catch (_) {}
@@ -234,33 +278,40 @@ function App() {
       const saved = localStorage.getItem('ferstudy.subjects');
       if (saved) return JSON.parse(saved);
     } catch (_) {}
-    return SUBJECTS;
+    return [];
   });
 
   // 🔄 Sync matérias
   uE(() => {
     if (!user || !window.db) return;
+    
     console.log("🔄 [SYNC subjects] Iniciando listener");
+    
     const unsubscribe = window.db
       .collection('users').doc(user.uid).collection('settings').doc('subjects')
       .onSnapshot(
         (doc) => {
+          // ✅ CORREÇÃO: Marca que recebeu dados da nuvem
+          hasReceivedCloudData.current.subjects = true;
+          
           if (!doc.exists) {
-            console.log("📝 [SYNC subjects] Doc não existe, mantendo locais");
-            initialSyncDone.current.subjects = true;
+            console.log("📝 [SYNC subjects] Doc não existe na nuvem");
             return;
           }
+          
           const data = doc.data();
-          if (data && Array.isArray(data.items)) {
+          if (data && Array.isArray(data.items) && data.items.length > 0) {
             console.log(`☁️ [SYNC subjects] ${data.items.length} matérias recebidas`);
             isSyncingSubjects.current = true;
             setSubjects(data.items);
             setTimeout(() => { isSyncingSubjects.current = false; }, 100);
+          } else {
+            console.log("📝 [SYNC subjects] Nuvem vazia, mantendo dados locais");
           }
-          initialSyncDone.current.subjects = true;
         },
         (error) => console.error('❌ [SYNC subjects]', error)
       );
+    
     return () => unsubscribe();
   }, [user]);
 
@@ -268,11 +319,14 @@ function App() {
   uE(() => {
     try {
       localStorage.setItem('ferstudy.subjects', JSON.stringify(subjects));
+      
+      // ✅ CORREÇÃO: Só sincroniza se foi alteração LOCAL
       if (isSyncingSubjects.current) return;
-      if (user && window.db) {
+      if (user && window.db && hasReceivedCloudData.current.subjects) {
         window.db.collection('users').doc(user.uid)
           .collection('settings').doc('subjects')
           .set({ items: subjects, updatedAt: Date.now() })
+          .then(() => console.log("✅ [SYNC subjects] Sincronizadas para nuvem"))
           .catch((error) => console.error('❌ Save subjects:', error));
       }
     } catch (_) {}
@@ -284,6 +338,7 @@ function App() {
       window.notesSync = null;
       return;
     }
+    
     const unsubscribe = window.db
       .collection('users').doc(user.uid).collection('notes')
       .onSnapshot(
@@ -293,8 +348,11 @@ function App() {
             const data = doc.data();
             if (data && Array.isArray(data.items)) {
               const key = `notes_${doc.id}`;
-              if (data.items.length > 0) localStorage.setItem(key, JSON.stringify(data.items));
-              else localStorage.removeItem(key);
+              if (data.items.length > 0) {
+                localStorage.setItem(key, JSON.stringify(data.items));
+              } else {
+                localStorage.removeItem(key);
+              }
             }
           });
           window.dispatchEvent(new CustomEvent('notes-updated'));
@@ -302,6 +360,7 @@ function App() {
         },
         (error) => console.error('❌ [SYNC notes]', error)
       );
+    
     window.notesSync = {
       saveNote: async (dateKey, items) => {
         if (isSyncingNotes.current) return;
@@ -318,6 +377,7 @@ function App() {
         } catch (error) { console.error('❌ Save note:', error); }
       }
     };
+    
     return () => { window.notesSync = null; unsubscribe(); };
   }, [user]);
 
