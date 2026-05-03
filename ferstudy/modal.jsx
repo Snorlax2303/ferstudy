@@ -1,9 +1,10 @@
-// ferstudy/modal.jsx — Event create/edit modal + Notes system com sync
+// ferstudy/modal.jsx
+// Modal de evento com notas coloridas + painel de comentários tipo thread
 
 const { useState, useEffect, useRef } = React;
 
 // ═══════════════════════════════════════════════════════════════════
-// NOTAS HELPERS
+// HELPERS DE NOTAS
 // ═══════════════════════════════════════════════════════════════════
 function createNote(content = '', tags = []) {
   return {
@@ -17,7 +18,6 @@ function createNote(content = '', tags = []) {
   };
 }
 
-const SUGGESTED_TAGS = ['Importante', 'Revisar', 'Dúvida', 'Resumo', 'Exemplo', 'Dever'];
 const NOTE_COLORS = [
   { id: 'yellow', label: 'Amarelo', bg: '#FEF3C7', border: '#FBBF24' },
   { id: 'pink', label: 'Rosa', bg: '#FCE7F3', border: '#F472B6' },
@@ -33,14 +33,26 @@ function loadNotesForDate(dateKey) {
   } catch { return []; }
 }
 
-function EventModal({ event, defaultDate, subjects, onClose, onSave, onDelete }) {
-  // Lista de matérias dinâmica (vem do app via prop) com fallback de segurança
+// ═══════════════════════════════════════════════════════════════════
+// HELPERS DE COMENTÁRIOS
+// ═══════════════════════════════════════════════════════════════════
+function createComment(content = '') {
+  return {
+    id: Date.now() + Math.random(),
+    content,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// MODAL PRINCIPAL
+// ═══════════════════════════════════════════════════════════════════
+function EventModal({ event, defaultDate, subjects, comments = [], onCommentsChange, onClose, onSave, onDelete }) {
   const subjectsList = (subjects && subjects.length > 0) ? subjects : SUBJECTS;
 
   const isNew = !event?.id;
   const [title, setTitle] = useState(event?.title || '');
-  // Se o evento tem uma matéria que não está mais na lista, mantém ela
-  // (não muda o que o usuário já escolheu, mesmo que a matéria tenha sido excluída)
   const [subject, setSubject] = useState(event?.subject || subjectsList[0] || '');
   const [date, setDate] = useState(event?.date || defaultDate || ymd(FAKE_TODAY));
   const [category, setCategory] = useState(event?.category || 'aula');
@@ -50,17 +62,28 @@ function EventModal({ event, defaultDate, subjects, onClose, onSave, onDelete })
   const [note, setNote] = useState(event?.note || '');
   const [completed, setCompleted] = useState(event?.completed || false);
 
+  // Notas coloridas
   const [notes, setNotes] = useState(() => loadNotesForDate(date));
   const [showNotes, setShowNotes] = useState(false);
-  const isLocalChange = useRef(false);
+  const isLocalChangeNote = useRef(false);
 
-  // Lista do select: une a matéria atual (se for "fantasma", excluída) com a lista oficial
+  // Comentários (sincronizados via props)
+  const [localComments, setLocalComments] = useState(comments);
+  const [newComment, setNewComment] = useState('');
+  const [editingCommentId, setEditingCommentId] = useState(null);
+  const [editingCommentText, setEditingCommentText] = useState('');
+  const commentsEndRef = useRef(null);
+
   const selectOptions = (() => {
     if (subject && !subjectsList.includes(subject)) {
       return [subject, ...subjectsList];
     }
     return subjectsList;
   })();
+
+  const scrollToBottom = () => {
+    commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
   useEffect(() => {
     const onEsc = (e) => { if (e.key === 'Escape') onClose(); };
@@ -70,9 +93,14 @@ function EventModal({ event, defaultDate, subjects, onClose, onSave, onDelete })
 
   useEffect(() => { setNotes(loadNotesForDate(date)); }, [date]);
 
+  // Sincroniza comentários via props
+  useEffect(() => {
+    setLocalComments(comments);
+  }, [comments]);
+
   useEffect(() => {
     const handleNotesUpdate = () => {
-      if (isLocalChange.current) { isLocalChange.current = false; return; }
+      if (isLocalChangeNote.current) { isLocalChangeNote.current = false; return; }
       setNotes(loadNotesForDate(date));
     };
     window.addEventListener('notes-updated', handleNotesUpdate);
@@ -81,7 +109,7 @@ function EventModal({ event, defaultDate, subjects, onClose, onSave, onDelete })
 
   useEffect(() => {
     try {
-      isLocalChange.current = true;
+      isLocalChangeNote.current = true;
       if (notes.length > 0) localStorage.setItem(`notes_${date}`, JSON.stringify(notes));
       else localStorage.removeItem(`notes_${date}`);
       if (window.notesSync && window.notesSync.saveNote) {
@@ -90,6 +118,9 @@ function EventModal({ event, defaultDate, subjects, onClose, onSave, onDelete })
     } catch (_) {}
   }, [notes, date]);
 
+  // ─────────────────────────────────────────────────────
+  // HANDLERS
+  // ─────────────────────────────────────────────────────
   const setHour = (which, delta) => {
     const cur = which === 'start' ? start : end;
     const [h, m] = cur.split(':').map(Number);
@@ -97,6 +128,38 @@ function EventModal({ event, defaultDate, subjects, onClose, onSave, onDelete })
     if (nh < 0) nh = 23; if (nh > 23) nh = 0;
     const v = `${pad(nh)}:${pad(m)}`;
     which === 'start' ? setStart(v) : setEnd(v);
+  };
+
+  const addComment = () => {
+    if (!newComment.trim()) return;
+    const updated = [...localComments, createComment(newComment)];
+    setLocalComments(updated);
+    if (onCommentsChange && event?.id) {
+      onCommentsChange(event.id, updated);
+    }
+    setNewComment('');
+    setTimeout(scrollToBottom, 100);
+  };
+
+  const updateComment = (id) => {
+    if (!editingCommentText.trim()) return;
+    const updated = localComments.map(c => 
+      c.id === id ? { ...c, content: editingCommentText, updatedAt: new Date().toISOString() } : c
+    );
+    setLocalComments(updated);
+    if (onCommentsChange && event?.id) {
+      onCommentsChange(event.id, updated);
+    }
+    setEditingCommentId(null);
+    setEditingCommentText('');
+  };
+
+  const deleteComment = (id) => {
+    const updated = localComments.filter(c => c.id !== id);
+    setLocalComments(updated);
+    if (onCommentsChange && event?.id) {
+      onCommentsChange(event.id, updated);
+    }
   };
 
   const addNote = () => setNotes([createNote(''), ...notes]);
@@ -134,140 +197,298 @@ function EventModal({ event, defaultDate, subjects, onClose, onSave, onDelete })
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <h2>{isNew ? 'Novo evento' : 'Editar evento'}</h2>
-        <button className="close" onClick={onClose}><Icon name="close" size={16} /></button>
-
-        <div style={{ marginTop: 14 }}>
-          <input
-            autoFocus value={title}
-            onChange={e => setTitle(e.target.value)}
-            placeholder="Título do evento"
-            style={{
-              width:'100%', background:'transparent', border:0, outline:0,
-              fontSize:22, fontWeight:700, color:'var(--text-1)',
-              padding:'6px 0 14px', borderBottom:'1px solid var(--hairline)',
-              letterSpacing:'-0.4px',
-            }}
-          />
-        </div>
-
-        <div className="field">
-          <label>Matéria</label>
-          {subjectsList.length === 0 ? (
-            <span style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic' }}>
-              Nenhuma matéria cadastrada — adicione na aba "Matérias"
-            </span>
-          ) : (
-            <select
-              value={subject}
-              onChange={e => setSubject(e.target.value)}
-              style={{
-                background:'var(--surface-hi)', border:'1px solid var(--hairline)',
-                borderRadius:10, padding:'7px 12px', fontSize:13, color:'var(--text-1)',
-                outline:0, width:'auto', cursor:'pointer',
-              }}
-            >
-              {selectOptions.map(s => (
-                <option key={s} value={s}>
-                  {s}{!subjectsList.includes(s) ? ' (excluída)' : ''}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-
-        <div className="field">
-          <label>Tipo</label>
-          <div className="cat-select">
-            {Object.values(CATEGORIES).map(c => {
-              const active = category === c.id;
-              return (
-                <button
-                  key={c.id}
-                  className={'cat-pill' + (active ? ' active' : '')}
-                  style={active ? {
-                    '--cp-color': c.soft, '--cp-border': c.color, '--cp-text': 'var(--text-1)',
-                  } : {}}
-                  onClick={() => setCategory(c.id)}
-                >
-                  <span className="swatch" style={{ background: c.color }} />
-                  {c.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="field">
-          <label>Data</label>
-          <input type="date" value={date} onChange={e => setDate(e.target.value)} />
-        </div>
-
-        <div className="field">
-          <label>Horário</label>
-          <div className="time-picker">
-            <TimeStepper which="start" value={start} />
-            <span className="time-sep">→</span>
-            <TimeStepper which="end" value={end} />
-            <span style={{ marginLeft:'auto', fontSize:11, color:'var(--text-3)', fontFamily:'JetBrains Mono, monospace' }}>
-              {fmtDuration(Math.max(durationMin(start, end), 0))}
-            </span>
-          </div>
-        </div>
-
-        <div className="field">
-          <label>Local</label>
-          <input type="text" value={location} onChange={e => setLocation(e.target.value)} placeholder="Sala, link ou local" />
-        </div>
-
-        <div className="field">
-          <label>Observação rápida</label>
-          <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="Adicionar observação" />
-        </div>
-
-        <div className="field" style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-          <label style={{ margin: 0 }}>✓ Concluído</label>
-          <input type="checkbox" checked={completed} onChange={e => setCompleted(e.target.checked)} style={{ width:18, height:18, cursor:'pointer' }} />
-        </div>
-
-        <div style={{ marginTop:20, paddingTop:20, borderTop:'1px solid var(--hairline)' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
-            <label style={{ margin:0, fontWeight:600, fontSize:13 }}>📝 Anotações ({notes.length})</label>
-            <button
-              onClick={() => setShowNotes(!showNotes)}
-              style={{
-                background: showNotes ? 'var(--text-3)' : 'var(--primary)',
-                color:'white', border:'none', borderRadius:6, padding:'6px 12px',
-                fontSize:11, fontWeight:600, cursor:'pointer', transition:'all 0.2s',
-              }}
-            >
-              {showNotes ? '✕ Fechar' : '+ Adicionar'}
-            </button>
-          </div>
-          {showNotes ? (
-            <NotesPanel notes={notes} onAddNote={addNote} onUpdateNote={updateNote} onDeleteNote={deleteNote} onTogglePin={togglePin} />
-          ) : notes.length > 0 ? (
-            <div style={{ fontSize:11, color:'var(--text-3)', background:'var(--surface)', padding:10, borderRadius:6, marginBottom:12 }}>
-              ✓ {notes.length} anotação{notes.length !== 1 ? 'ões' : ''} salva{notes.length !== 1 ? 's' : ''}
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: isNew ? 460 : 900 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isNew ? '1fr' : '1fr 1fr', gap: isNew ? 0 : 20, minHeight: isNew ? 'auto' : '600px' }}>
+          
+          {/* ═══════ COLUNA ESQUERDA: DADOS DO EVENTO ═══════ */}
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <h2 style={{ margin: 0 }}>{isNew ? 'Novo evento' : 'Editar evento'}</h2>
+              <button className="close" onClick={onClose}><Icon name="close" size={16} /></button>
             </div>
-          ) : null}
-        </div>
 
-        <div className="modal-footer">
-          {!isNew ? (
-            <button className="btn btn-danger" onClick={() => onDelete(event.id)}>
-              <span style={{ display:'inline-flex', alignItems:'center', gap: 6 }}>
-                <Icon name="trash" size={14} /> Excluir
-              </span>
-            </button>
-          ) : <span />}
-          <div style={{ display:'flex', gap:8 }}>
-            <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-            <button className="btn btn-primary" onClick={submit}>{isNew ? 'Criar' : 'Salvar'}</button>
+            <div style={{ overflowY: 'auto', paddingRight: 8, flex: 1 }}>
+              
+              {/* Título */}
+              <div style={{ marginBottom: 14 }}>
+                <input
+                  autoFocus value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  placeholder="Título do evento"
+                  style={{
+                    width:'100%', background:'transparent', border:0, outline:0,
+                    fontSize:22, fontWeight:700, color:'var(--text-1)',
+                    padding:'6px 0 14px', borderBottom:'1px solid var(--hairline)',
+                    letterSpacing:'-0.4px',
+                  }}
+                />
+              </div>
+
+              {/* Matéria */}
+              <div className="field">
+                <label>Matéria</label>
+                {subjectsList.length === 0 ? (
+                  <span style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic' }}>
+                    Nenhuma matéria cadastrada
+                  </span>
+                ) : (
+                  <select
+                    value={subject}
+                    onChange={e => setSubject(e.target.value)}
+                    style={{
+                      background:'var(--surface-hi)', border:'1px solid var(--hairline)',
+                      borderRadius:10, padding:'7px 12px', fontSize:13, color:'var(--text-1)',
+                      outline:0, width:'auto', cursor:'pointer',
+                    }}
+                  >
+                    {selectOptions.map(s => (
+                      <option key={s} value={s}>
+                        {s}{!subjectsList.includes(s) ? ' (excluída)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Tipo */}
+              <div className="field">
+                <label>Tipo</label>
+                <div className="cat-select">
+                  {Object.values(CATEGORIES).map(c => {
+                    const active = category === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        className={'cat-pill' + (active ? ' active' : '')}
+                        style={active ? {
+                          '--cp-color': c.soft, '--cp-border': c.color, '--cp-text': 'var(--text-1)',
+                        } : {}}
+                        onClick={() => setCategory(c.id)}
+                      >
+                        <span className="swatch" style={{ background: c.color }} />
+                        {c.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Data */}
+              <div className="field">
+                <label>Data</label>
+                <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+              </div>
+
+              {/* Horário */}
+              <div className="field">
+                <label>Horário</label>
+                <div className="time-picker">
+                  <TimeStepper which="start" value={start} />
+                  <span className="time-sep">→</span>
+                  <TimeStepper which="end" value={end} />
+                  <span style={{ marginLeft:'auto', fontSize:11, color:'var(--text-3)', fontFamily:'JetBrains Mono, monospace' }}>
+                    {fmtDuration(Math.max(durationMin(start, end), 0))}
+                  </span>
+                </div>
+              </div>
+
+              {/* Local */}
+              <div className="field">
+                <label>Local</label>
+                <input type="text" value={location} onChange={e => setLocation(e.target.value)} placeholder="Sala, link ou local" />
+              </div>
+
+              {/* Observação rápida */}
+              <div className="field">
+                <label>Observação rápida</label>
+                <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="Adicionar observação" />
+              </div>
+
+              {/* Concluído */}
+              <div className="field" style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                <label style={{ margin: 0 }}>✓ Concluído</label>
+                <input type="checkbox" checked={completed} onChange={e => setCompleted(e.target.checked)} style={{ width:18, height:18, cursor:'pointer' }} />
+              </div>
+
+              {/* Notas coloridas */}
+              <div style={{ marginTop:20, paddingTop:20, borderTop:'1px solid var(--hairline)' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+                  <label style={{ margin:0, fontWeight:600, fontSize:13 }}>📝 Anotações ({notes.length})</label>
+                  <button
+                    onClick={() => setShowNotes(!showNotes)}
+                    style={{
+                      background: showNotes ? 'var(--text-3)' : 'var(--primary)',
+                      color:'white', border:'none', borderRadius:6, padding:'6px 12px',
+                      fontSize:11, fontWeight:600, cursor:'pointer', transition:'all 0.2s',
+                    }}
+                  >
+                    {showNotes ? '✕ Fechar' : '+ Adicionar'}
+                  </button>
+                </div>
+                {showNotes ? (
+                  <NotesPanel notes={notes} onAddNote={addNote} onUpdateNote={updateNote} onDeleteNote={deleteNote} onTogglePin={togglePin} />
+                ) : notes.length > 0 ? (
+                  <div style={{ fontSize:11, color:'var(--text-3)', background:'var(--surface)', padding:10, borderRadius:6, marginBottom:12 }}>
+                    ✓ {notes.length} anotação{notes.length !== 1 ? 'ões' : ''} salva{notes.length !== 1 ? 's' : ''}
+                  </div>
+                ) : null}
+              </div>
+
+              {/* Botões de ação */}
+              <div className="modal-footer" style={{ marginTop: 20 }}>
+                {!isNew ? (
+                  <button className="btn btn-danger" onClick={() => onDelete(event.id)}>
+                    <span style={{ display:'inline-flex', alignItems:'center', gap: 6 }}>
+                      <Icon name="trash" size={14} /> Excluir
+                    </span>
+                  </button>
+                ) : <span />}
+                <div style={{ display:'flex', gap:8 }}>
+                  <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+                  <button className="btn btn-primary" onClick={submit}>{isNew ? 'Criar' : 'Salvar'}</button>
+                </div>
+              </div>
+            </div>
           </div>
+
+          {/* ═══════ COLUNA DIREITA: COMENTÁRIOS (apenas edit) ═══════ */}
+          {!isNew && (
+            <div style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--hairline)', paddingLeft: 20 }}>
+              <h3 style={{ margin: '0 0 14px 0', fontSize: 16, fontWeight: 700 }}>💬 Comentários</h3>
+
+              {/* Thread de comentários */}
+              <div style={{
+                flex: 1, overflowY: 'auto', marginBottom: 14, paddingRight: 8,
+                display: 'flex', flexDirection: 'column', gap: 10,
+                scrollbarWidth: 'thin',
+              }}>
+                {localComments.length === 0 ? (
+                  <div style={{ color: 'var(--text-3)', fontSize: 12, fontStyle: 'italic', textAlign: 'center', padding: '20px 0' }}>
+                    Nenhum comentário ainda
+                  </div>
+                ) : (
+                  localComments.map(comment => (
+                    <CommentItem
+                      key={comment.id}
+                      comment={comment}
+                      isEditing={editingCommentId === comment.id}
+                      editText={editingCommentText}
+                      onEditStart={() => { setEditingCommentId(comment.id); setEditingCommentText(comment.content); }}
+                      onEditChange={(text) => setEditingCommentText(text)}
+                      onEditSave={() => updateComment(comment.id)}
+                      onEditCancel={() => { setEditingCommentId(null); setEditingCommentText(''); }}
+                      onDelete={() => deleteComment(comment.id)}
+                    />
+                  ))
+                )}
+                <div ref={commentsEndRef} />
+              </div>
+
+              {/* Input novo comentário */}
+              <div style={{ display: 'flex', gap: 8, borderTop: '1px solid var(--hairline)', paddingTop: 12 }}>
+                <input
+                  type="text"
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') addComment(); }}
+                  placeholder="Adicionar comentário..."
+                  style={{
+                    flex: 1, padding: '8px 10px', border: '1px solid var(--hairline)', borderRadius: 6,
+                    background: 'var(--surface-hi)', color: 'var(--text-1)', fontSize: 12,
+                    outline: 'none',
+                  }}
+                />
+                <button
+                  onClick={addComment}
+                  disabled={!newComment.trim()}
+                  style={{
+                    padding: '8px 12px', background: newComment.trim() ? 'var(--primary)' : 'var(--text-4)', color: 'white',
+                    border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: newComment.trim() ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  ✓
+                </button>
+              </div>
+            </div>
+          )}
+
         </div>
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// COMMENT ITEM
+// ═══════════════════════════════════════════════════════════════════
+function CommentItem({ comment, isEditing, editText, onEditStart, onEditChange, onEditSave, onEditCancel, onDelete }) {
+  const timeAgo = (() => {
+    const diff = new Date() - new Date(comment.updatedAt);
+    const mins = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    if (mins < 1) return 'agora';
+    if (mins < 60) return `${mins}m atrás`;
+    if (hours < 24) return `${hours}h atrás`;
+    return `${days}d atrás`;
+  })();
+
+  return (
+    <div style={{
+      background: 'var(--surface-hi)', border: '1px solid var(--hairline)', borderRadius: 8,
+      padding: 10,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{timeAgo}</span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button
+            onClick={onEditStart}
+            style={{ background: 'none', border: 'none', fontSize: 12, cursor: 'pointer', color: 'var(--text-3)', padding: 0 }}
+            title="Editar"
+          >
+            ✎
+          </button>
+          <button
+            onClick={onDelete}
+            style={{ background: 'none', border: 'none', fontSize: 12, cursor: 'pointer', color: '#E94B3C', padding: 0 }}
+            title="Deletar"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+      {!isEditing ? (
+        <div style={{ fontSize: 12, color: 'var(--text-1)', lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {comment.content}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 6 }}>
+          <textarea
+            autoFocus
+            value={editText}
+            onChange={(e) => onEditChange(e.target.value)}
+            style={{
+              flex: 1, padding: 8, border: '1px solid var(--primary)', borderRadius: 4,
+              fontSize: 11, fontFamily: 'inherit', minHeight: 40, resize: 'none',
+              background: 'var(--surface)', color: 'var(--text-1)',
+            }}
+          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <button
+              onClick={onEditSave}
+              style={{ padding: '4px 8px', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: 4, fontSize: 10, cursor: 'pointer' }}
+            >
+              ✓
+            </button>
+            <button
+              onClick={onEditCancel}
+              style={{ padding: '4px 8px', background: 'var(--text-4)', color: 'white', border: 'none', borderRadius: 4, fontSize: 10, cursor: 'pointer' }}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -292,7 +513,7 @@ function NotesPanel({ notes, onAddNote, onUpdateNote, onDeleteNote, onTogglePin 
       }}>
         {sortedNotes.length === 0 ? (
           <div style={{ padding:'20px 12px', textAlign:'center', color:'var(--text-3)', fontSize:12 }}>
-            Nenhuma anotação ainda. Clique em "+ Criar primeira nota" para começar!
+            Nenhuma anotação ainda
           </div>
         ) : (
           sortedNotes.map(note => (
@@ -390,3 +611,4 @@ function NoteCard({ note, onUpdate, onDelete, onTogglePin }) {
 window.EventModal = EventModal;
 window.NotesPanel = NotesPanel;
 window.NoteCard = NoteCard;
+window.CommentItem = CommentItem;
