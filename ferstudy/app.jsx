@@ -31,6 +31,7 @@ function App() {
   const isSyncingCategories = uR(false);
   const isSyncingSubjects = uR(false);
   const isSyncingNotes = uR(false);
+  const isSyncingComments = uR(false);
   const initialSyncDone = uR({ events: false, categories: false, subjects: false });
 
   // Aguardar Firebase
@@ -172,6 +173,45 @@ function App() {
       }
     } catch (_) {}
   }, [events, user]);
+
+  // ============ COMENTÁRIOS ============
+  const [eventComments, setEventComments] = uS({});
+
+  uE(() => {
+    if (!user || !window.db) return;
+    const unsubscribe = window.db
+      .collection('users').doc(user.uid).collection('eventComments')
+      .onSnapshot(
+        (snapshot) => {
+          const comments = {};
+          snapshot.docs.forEach(doc => {
+            const data = doc.data();
+            comments[data.eventId] = data.comments || [];
+          });
+          isSyncingComments.current = true;
+          setEventComments(comments);
+          setTimeout(() => { isSyncingComments.current = false; }, 100);
+        },
+        (error) => console.error('❌ [SYNC comments]', error)
+      );
+    return () => unsubscribe();
+  }, [user]);
+
+  uE(() => {
+    if (isSyncingComments.current) return;
+    if (user && window.db && Object.keys(eventComments).length > 0) {
+      const batch = window.db.batch();
+      const commentsCol = window.db.collection('users').doc(user.uid).collection('eventComments');
+      Object.entries(eventComments).forEach(([eventId, comments]) => {
+        if (comments.length > 0) {
+          batch.set(commentsCol.doc(eventId), { eventId, comments });
+        } else {
+          batch.delete(commentsCol.doc(eventId));
+        }
+      });
+      batch.commit().catch((error) => console.error('❌ Save comments:', error));
+    }
+  }, [eventComments, user]);
 
   // ============ CATEGORIAS ============
   const [categories, setCategories] = uS(() => {
@@ -588,7 +628,18 @@ function App() {
       </div>
 
       {modalOpen && (
-        <EventModal event={editing?.event} defaultDate={editing?.defaultDate} subjects={subjects} onClose={() => setModalOpen(false)} onSave={saveEvent} onDelete={deleteEvent} />
+        <EventModal 
+          event={editing?.event} 
+          defaultDate={editing?.defaultDate} 
+          subjects={subjects} 
+          comments={eventComments[editing?.event?.id] || []}
+          onCommentsChange={(eventId, newComments) => {
+            setEventComments(prev => ({ ...prev, [eventId]: newComments }));
+          }}
+          onClose={() => setModalOpen(false)} 
+          onSave={saveEvent} 
+          onDelete={deleteEvent} 
+        />
       )}
 
       <TweaksPanel title="Tweaks · Ferstudy">
